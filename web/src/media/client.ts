@@ -100,6 +100,11 @@ export class MediaClient implements MediaControls {
   private readonly speakingListeners = new Set<SpeakingListener>()
   private mic: DeviceState
   private camera: DeviceState = { on: false, busy: false, error: null }
+  // What the room carries; null when a failed call left it unknown.
+  private micLive: boolean | null = false
+  private cameraLive: boolean | null = false
+  // Bumped whenever the room is dropped, so late results are ignored.
+  private session = 0
   private readonly createRoom: RoomFactory
   private readonly view: MediaView
   private readonly prefs: MediaPrefs
@@ -159,6 +164,7 @@ export class MediaClient implements MediaControls {
       return
     }
     this.setLink('stopped')
+    this.session++
     clearTimeout(this.retryTimer)
     this.resetMedia()
     void this.room?.disconnect()
@@ -210,16 +216,25 @@ export class MediaClient implements MediaControls {
     const grant = this.grant
     if (!grant) return
     this.setLink('connecting')
-    let room: MediaRoom
+    const session = ++this.session
+    this.micLive = false
+    this.cameraLive = false
+    let room = this.room
     try {
-      room = this.room ?? (await this.createRoom(this.listener))
-      this.room = room
+      if (!room) {
+        room = await this.createRoom(this.listener)
+        if (session !== this.session) {
+          void room.disconnect()
+          return
+        }
+        this.room = room
+      }
       await room.connect(grant.url, grant.token)
     } catch {
-      if (this.link === 'connecting') this.lost('other')
+      if (session === this.session) this.lost('other')
       return
     }
-    if (this.link !== 'connecting') {
+    if (session !== this.session) {
       void room.disconnect()
       return
     }
@@ -227,11 +242,11 @@ export class MediaClient implements MediaControls {
     this.setLink('connected')
     this.view.setPlaybackBlocked(!room.canPlaybackAudio)
     this.sync(true)
-    if (this.mic.on) await this.applyMic()
-    if (this.camera.on) await this.applyCamera()
+    await this.applyDevices()
   }
 
   private lost(kind: DisconnectKind): void {
+    this.session++
     this.resetMedia()
     switch (disconnectAction(kind, this.grant, this.now())) {
       case 'stop':
@@ -259,6 +274,7 @@ export class MediaClient implements MediaControls {
       if (this.link !== 'reconnecting') return
       this.setLink('connected')
       this.sync(true)
+      void this.applyDevices()
     },
     disconnected: (kind) => {
       if (this.link === 'connected' || this.link === 'reconnecting') this.lost(kind)
@@ -283,7 +299,8 @@ export class MediaClient implements MediaControls {
     if (!room || (this.link !== 'connected' && this.link !== 'reconnecting')) return
 
     const pubs = room.publications()
-    const video = nearest(videoCandidates(pubs, this.nearby), (id) => this.distanceTo(id), VIDEO_LIMIT)
+    const watched = new Set(pubs.filter((p) => p.kind === 'video' && p.desired).map((p) => p.identity))
+    const video = nearest(videoCandidates(pubs, this.nearby), (id) => this.distanceTo(id), VIDEO_LIMIT, watched)
     for (const change of subscriptionChanges(pubs, this.nearby, video)) {
       room.setSubscribed(change.identity, change.sid, change.subscribe)
       if (change.kind === 'video' && !change.subscribe) this.view.hideVideo(change.identity)
@@ -304,31 +321,59 @@ export class MediaClient implements MediaControls {
     return self && other ? distance(self, other) : Infinity
   }
 
+  private async applyDevices(): Promise<void> {
+    await this.applyMic()
+    await this.applyCamera()
+  }
+
+  // Turning a device off only mutes the local track, so it is safe while
+  // LiveKit reconnects; turning one on waits for the connection.
+  private canApply(on: boolean): boolean {
+    return this.link === 'connected' || (this.link === 'reconnecting' && !on)
+  }
+
   private async applyMic(): Promise<void> {
     const room = this.room
-    if (!room || this.link !== 'connected') return
     const on = this.mic.on
+    if (!room || this.mic.busy || this.micLive === on || !this.canApply(on)) return
+    const session = this.session
     this.setMic({ on, busy: true, error: null })
-    try {
-      await room.setMicrophoneEnabled(on)
-      this.setMic({ on, busy: false, error: null })
-    } catch (err) {
-      this.setMic({ on: false, busy: false, error: deviceError(err) })
+    const error = await room.setMicrophoneEnabled(on).then(() => null, deviceError)
+    if (session === this.session) {
+      if (error) {
+        this.micLive = on ? false : null
+        return this.setMic({ on: false, busy: false, error })
+      }
+      this.micLive = on
     }
+    this.setMic({ on, busy: false, error: null })
+    await this.applyMic()
   }
 
   private async applyCamera(): Promise<void> {
     const room = this.room
-    if (!room || this.link !== 'connected') return
     const on = this.camera.on
+    if (!room || this.camera.busy || this.cameraLive === on || !this.canApply(on)) return
+    const session = this.session
     this.setCamera({ on, busy: true, error: null })
+    let preview: HTMLMediaElement | null = null
+    let error: DeviceError | null = null
     try {
-      this.view.showSelfVideo(await room.setCameraEnabled(on))
-      this.setCamera({ on, busy: false, error: null })
+      preview = await room.setCameraEnabled(on)
     } catch (err) {
-      this.view.showSelfVideo(null)
-      this.setCamera({ on: false, busy: false, error: deviceError(err) })
+      error = deviceError(err)
     }
+    if (session === this.session) {
+      if (error) {
+        this.cameraLive = on ? false : null
+        this.view.showSelfVideo(null)
+        return this.setCamera({ on: false, busy: false, error })
+      }
+      this.cameraLive = on
+      this.view.showSelfVideo(preview)
+    }
+    this.setCamera({ on, busy: false, error: null })
+    await this.applyCamera()
   }
 
   private resetMedia(): void {

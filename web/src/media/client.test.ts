@@ -19,6 +19,8 @@ class FakeRoom implements MediaRoom {
   mic: boolean[] = []
   camera: boolean[] = []
   micError: Error | null = null
+  // Holds the next camera call until resolved.
+  cameraGate: Promise<void> | null = null
   audioStarts = 0
 
   constructor(readonly listener: RoomListener) {}
@@ -49,6 +51,9 @@ class FakeRoom implements MediaRoom {
   }
   async setCameraEnabled(on: boolean): Promise<HTMLMediaElement | null> {
     this.camera.push(on)
+    const gate = this.cameraGate
+    this.cameraGate = null
+    await gate
     return on ? element('preview') : null
   }
   async startAudio(): Promise<void> {
@@ -120,6 +125,12 @@ class MemoryPrefs implements MediaPrefs {
   }
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {}
+  const promise = new Promise<void>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
 function element(name: string): HTMLMediaElement {
   return { id: name } as HTMLMediaElement
 }
@@ -141,11 +152,13 @@ describe('MediaClient', () => {
   let rooms: FakeRoom[]
   let view: FakeView
   let prefs: MemoryPrefs
+  let loading: Promise<void> | null
 
   const setup = (muted = false, configure?: (room: FakeRoom) => void) => {
     prefs = new MemoryPrefs(muted)
     const client = new MediaClient({
       createRoom: async (listener) => {
+        await loading
         const room = new FakeRoom(listener)
         configure?.(room)
         rooms.push(room)
@@ -168,6 +181,7 @@ describe('MediaClient', () => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     rooms = []
+    loading = null
     view = new FakeView()
   })
 
@@ -233,6 +247,30 @@ describe('MediaClient', () => {
 
     client.handle(nearby('p1'))
     expect(r.subscribed()).toEqual(['p1-audio', 'p1-video'])
+  })
+
+  it('keeps the 8th camera until another is clearly closer', async () => {
+    const others = Array.from({ length: 8 }, (_, i) => player(`p${i + 1}`, i + 1))
+    const client = setup()
+    client.handle(welcome([...others, player('p9', 8, 1)]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    for (const p of [...others, player('p9', 8, 1)]) r.publish(p.id, 'video')
+    client.handle(nearby(...others.map((p) => p.id), 'p9'))
+    expect(r.subscribed()).toContain('p8-video')
+
+    client.handle(moved('p8', 9))
+    expect(r.subscribed()).toContain('p8-video')
+    expect(r.subscribed()).not.toContain('p9-video')
+    client.handle(moved('p8', 8))
+    client.handle(moved('p9', 8, 1))
+    expect(r.subscribed()).toContain('p8-video')
+    expect(r.subscribed()).not.toContain('p9-video')
+
+    client.handle(moved('p9', 6, 1))
+    expect(r.subscribed()).toContain('p9-video')
+    expect(r.subscribed()).not.toContain('p8-video')
   })
 
   it('hides a tile as soon as its video is unsubscribed', async () => {
@@ -313,6 +351,90 @@ describe('MediaClient', () => {
     await vi.runAllTimersAsync()
     expect(rooms).toHaveLength(0)
     expect(view.links).toEqual([])
+  })
+
+  it('drops a room that finished loading after the tab was replaced', async () => {
+    const load = deferred()
+    loading = load.promise
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    client.setConnectionStatus('replaced')
+    load.resolve()
+    await vi.runAllTimersAsync()
+    expect(room().connects).toEqual([])
+    expect(room().disconnects).toBe(1)
+    expect(client.state).toBe('stopped')
+  })
+
+  it('mutes at once while reconnecting and applies the rest once reconnected', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+
+    r.listener.reconnecting()
+    client.toggleMic()
+    client.toggleCamera()
+    await vi.runAllTimersAsync()
+    expect(r.mic).toEqual([true, false])
+    expect(r.camera).toEqual([])
+    expect(view.camera).toEqual({ on: true, busy: false, error: null })
+
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.mic).toEqual([true, false])
+    expect(r.camera).toEqual([true])
+    expect(view.self).not.toBeNull()
+
+    r.listener.reconnecting()
+    client.toggleMic()
+    client.toggleCamera()
+    client.toggleCamera()
+    await vi.runAllTimersAsync()
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.mic).toEqual([true, false, true])
+    expect(r.camera).toEqual([true, false])
+    expect(view.mic).toEqual({ on: true, busy: false, error: null })
+    expect(view.camera).toEqual({ on: false, busy: false, error: null })
+  })
+
+  it('does not show a camera that opened after the room stopped', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const open = deferred()
+    room().cameraGate = open.promise
+    client.toggleCamera()
+    client.stop()
+    open.resolve()
+    await vi.runAllTimersAsync()
+    expect(view.self).toBeNull()
+    expect(view.camera).toEqual({ on: true, busy: false, error: null })
+  })
+
+  it('opens the camera again when the room drops while it was opening', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    const open = deferred()
+    r.cameraGate = open.promise
+    client.toggleCamera()
+    r.listener.disconnected('other')
+    open.resolve()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(client.state).toBe('retrying')
+    expect(view.self).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(client.state).toBe('connected')
+    expect(r.camera).toEqual([true, true])
+    expect(view.self).not.toBeNull()
   })
 
   it('retries a dropped room with the last grant after a backoff', async () => {
