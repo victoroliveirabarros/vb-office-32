@@ -12,6 +12,10 @@ const DEFAULT_STEP_MS = 150
 
 type DirKeys = Record<Dir, Phaser.Input.Keyboard.Key[]>
 
+export type SpeakingSource = {
+  onSpeaking(fn: (ids: ReadonlySet<string>) => void): () => void
+}
+
 export class OfficeScene extends Phaser.Scene {
   private grid!: Grid
   private keys!: DirKeys
@@ -20,10 +24,12 @@ export class OfficeScene extends Phaser.Scene {
   private predictor: Predictor | null = null
   private stepMs = DEFAULT_STEP_MS
   private nextStepAt = 0
+  private speaking: ReadonlySet<string> = new Set()
 
   constructor(
     private readonly connection: Connection,
     private readonly hud: Hud,
+    private readonly speakers?: SpeakingSource,
   ) {
     super('office')
   }
@@ -48,9 +54,11 @@ export class OfficeScene extends Phaser.Scene {
     const offStatus = this.connection.onStatus((status) => {
       if (status !== 'open') this.predictor = null
     })
+    const offSpeaking = this.speakers?.onSpeaking((ids) => this.showSpeaking(ids))
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       offMessage()
       offStatus()
+      offSpeaking?.()
       this.scale.off(Phaser.Scale.Events.RESIZE, this.fitCamera, this)
     })
 
@@ -140,7 +148,14 @@ export class OfficeScene extends Phaser.Scene {
       existing.setLabel(player.name)
       return
     }
-    this.avatars.set(player.id, new Avatar(this, player))
+    const avatar = new Avatar(this, player)
+    avatar.setSpeaking(this.speaking.has(player.id))
+    this.avatars.set(player.id, avatar)
+  }
+
+  private showSpeaking(ids: ReadonlySet<string>): void {
+    this.speaking = ids
+    this.avatars.forEach((avatar, id) => avatar.setSpeaking(ids.has(id)))
   }
 
   private self(): Avatar | undefined {

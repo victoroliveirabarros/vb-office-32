@@ -3,9 +3,12 @@ import type { Facing } from '../game/grid'
 import type { Dir, Player } from '../net/protocol'
 import { AVATAR_KEY, TILE_SIZE } from '../scenes/assets'
 
+const SPEAKING_COLOR = 0x5ee27a
+
 export class Avatar extends Phaser.GameObjects.Container {
   private readonly sprite: Phaser.GameObjects.Image
   private readonly label: Phaser.GameObjects.Text
+  private readonly ring: Phaser.GameObjects.Arc
   private motion: Phaser.Tweens.Tween | null = null
   private current: Facing
 
@@ -25,7 +28,9 @@ export class Avatar extends Phaser.GameObjects.Container {
       })
       .setOrigin(0.5, 1)
 
-    this.add([this.sprite, this.label])
+    this.ring = scene.add.circle(0, 2, 14).setStrokeStyle(2, SPEAKING_COLOR).setVisible(false)
+
+    this.add([this.ring, this.sprite, this.label])
     this.setDepth(10)
     scene.add.existing(this)
   }
@@ -36,6 +41,10 @@ export class Avatar extends Phaser.GameObjects.Container {
 
   setLabel(name: string): void {
     this.label.setText(name)
+  }
+
+  setSpeaking(speaking: boolean): void {
+    this.ring.setVisible(speaking)
   }
 
   face(dir: Dir): void {

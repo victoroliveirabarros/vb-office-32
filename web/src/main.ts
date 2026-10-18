@@ -1,4 +1,7 @@
 import Phaser from 'phaser'
+import { MediaClient } from './media/client'
+import type { MediaRoom, RoomListener } from './media/client'
+import { storagePrefs } from './media/prefs'
 import { backoffDelay, Connection, wsUrl } from './net/connection'
 import type { ConnectionStatus } from './net/connection'
 import { fetchSession, logout, sessionAlive } from './net/session'
@@ -9,6 +12,7 @@ import { createHud } from './ui/hud'
 import type { Hud } from './ui/hud'
 import { askName } from './ui/join'
 import { showLogin, showLogout } from './ui/login'
+import { createMediaView } from './ui/media'
 
 const STATUS_TEXT: Record<ConnectionStatus, string | null> = {
   connecting: 'Conectando…',
@@ -18,9 +22,20 @@ const STATUS_TEXT: Record<ConnectionStatus, string | null> = {
   expired: 'Sessão expirada',
 }
 
+// The SDK loads only once the server hands out a media grant.
+async function createRoom(listener: RoomListener): Promise<MediaRoom> {
+  const { createLiveKitRoom } = await import('./media/livekit')
+  return createLiveKitRoom(listener)
+}
+
 function start(hud: Hud, connection: Connection): void {
+  const view = createMediaView()
+  const media = new MediaClient({ createRoom, view, prefs: storagePrefs })
+  view.bind(media)
+  connection.onMessage((msg) => media.handle(msg))
   connection.onStatus((status) => {
     hud.setStatus(STATUS_TEXT[status])
+    media.setConnectionStatus(status)
     if (status === 'expired') location.assign('/')
   })
 
@@ -31,7 +46,7 @@ function start(hud: Hud, connection: Connection): void {
     pixelArt: true,
     roundPixels: true,
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-    scene: [new BootScene(hud), new OfficeScene(connection, hud)],
+    scene: [new BootScene(hud), new OfficeScene(connection, hud, media)],
   })
 }
 
