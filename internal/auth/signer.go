@@ -12,14 +12,17 @@ import (
 )
 
 const (
-	tokenVersion = 1
+	tokenVersion = 2
 	maxTokenLen  = 3072
 
 	purposeSession = "vb-office-32 session v1"
 	purposeFlow    = "vb-office-32 oidc-flow v1"
 )
 
-var errInvalidToken = errors.New("invalid or expired token")
+var (
+	errInvalidToken = errors.New("invalid or expired token")
+	errTokenTooLong = errors.New("token exceeds size limit")
+)
 
 // header is embedded in every signed payload.
 type header struct {
@@ -59,7 +62,11 @@ func (s signer) seal(p payload) (string, error) {
 		return "", err
 	}
 	body := base64.RawURLEncoding.EncodeToString(b)
-	return body + "." + base64.RawURLEncoding.EncodeToString(s.mac(body)), nil
+	token := body + "." + base64.RawURLEncoding.EncodeToString(s.mac(body))
+	if len(token) > maxTokenLen {
+		return "", errTokenTooLong
+	}
+	return token, nil
 }
 
 func (s signer) open(token string, now time.Time, p payload) error {

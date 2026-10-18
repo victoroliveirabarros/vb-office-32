@@ -54,13 +54,15 @@ type fakeIDP struct {
 
 	discoveries atomic.Int32
 
-	mu             sync.Mutex
-	failDiscovery  int
-	codes          map[string]grant
-	claims         func(map[string]any)
-	signKID        string
-	wrongChallenge bool
-	dropToken      bool
+	mu               sync.Mutex
+	failDiscovery    int
+	discoveryEntered chan struct{}
+	discoveryRelease chan struct{}
+	codes            map[string]grant
+	claims           func(map[string]any)
+	signKID          string
+	wrongChallenge   bool
+	dropToken        bool
 }
 
 type grant struct {
@@ -104,7 +106,15 @@ func (idp *fakeIDP) discovery(w http.ResponseWriter, _ *http.Request) {
 	if fail {
 		idp.failDiscovery--
 	}
+	entered, release := idp.discoveryEntered, idp.discoveryRelease
 	idp.mu.Unlock()
+	if release != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}
 	if fail {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 		return
@@ -281,6 +291,9 @@ func newHarness(t *testing.T, publicURL string) *harness {
 	return &harness{t: t, clock: c, idp: idp, o: o, logs: logs}
 }
 
+// longDomain has 251 bytes, close to the DNS limit.
+var longDomain = strings.Repeat(strings.Repeat("d", 60)+".", 4) + "example"
+
 var noRedirect = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // startLogin runs /auth/login and the provider's authorize step, returning
@@ -291,7 +304,7 @@ func (h *harness) startLogin() *http.Request {
 	if res.StatusCode != http.StatusFound {
 		h.t.Fatalf("login status = %d, want 302", res.StatusCode)
 	}
-	flow := findCookie(res, flowCookie)
+	flow := findCookie(res, h.o.flowCookie)
 	if flow == nil {
 		h.t.Fatal("login set no flow cookie")
 	}
@@ -345,11 +358,11 @@ func findCookie(res *http.Response, name string) *http.Cookie {
 
 func TestLoginSuccess(t *testing.T) {
 	tests := []struct {
-		publicURL, cookie string
-		secure            bool
+		publicURL, cookie, flowCookie string
+		secure                        bool
 	}{
-		{"http://localhost:5173", "vb_office32_session", false},
-		{"https://office.example", "__Host-vb_office32_session", true},
+		{"http://localhost:5173", "vb_office32_session", "vb_office32_oidc", false},
+		{"https://office.example", "__Host-vb_office32_session", "__Host-vb_office32_oidc", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.publicURL, func(t *testing.T) {
@@ -359,8 +372,8 @@ func TestLoginSuccess(t *testing.T) {
 			if got := res.Header.Get("Cache-Control"); got != "no-store" {
 				t.Errorf("login Cache-Control = %q", got)
 			}
-			flow := findCookie(res, flowCookie)
-			if flow == nil || !flow.HttpOnly || flow.SameSite != http.SameSiteLaxMode || flow.Path != "/auth/" ||
+			flow := findCookie(res, tt.flowCookie)
+			if flow == nil || !flow.HttpOnly || flow.SameSite != http.SameSiteLaxMode || flow.Path != "/" ||
 				flow.MaxAge != 600 || flow.Secure != tt.secure {
 				t.Errorf("flow cookie = %+v", flow)
 			}
@@ -384,7 +397,7 @@ func TestLoginSuccess(t *testing.T) {
 			if res.Header.Get("Cache-Control") != "no-store" || res.Header.Get("Referrer-Policy") != "no-referrer" {
 				t.Errorf("callback headers = %v", res.Header)
 			}
-			if c := findCookie(res, flowCookie); c == nil || c.MaxAge >= 0 || c.Path != "/auth/" {
+			if c := findCookie(res, tt.flowCookie); c == nil || c.MaxAge >= 0 || c.Path != "/" {
 				t.Errorf("flow cookie not deleted: %+v", c)
 			}
 			sess := findCookie(res, tt.cookie)
@@ -439,7 +452,7 @@ func TestCallbackRejects(t *testing.T) {
 			h.clock.advance(flowTTL + time.Second)
 		}},
 		{name: "flow cookie signed with session key", reason: "invalid login flow", status: 400, before: func(h *harness, r *http.Request) {
-			c, err := r.Cookie(flowCookie)
+			c, err := r.Cookie(h.o.flowCookie)
 			if err != nil {
 				h.t.Fatal(err)
 			}
@@ -452,8 +465,27 @@ func TestCallbackRejects(t *testing.T) {
 				h.t.Fatal(err)
 			}
 			r.Header.Del("Cookie")
-			r.AddCookie(&http.Cookie{Name: flowCookie, Value: token})
+			r.AddCookie(&http.Cookie{Name: h.o.flowCookie, Value: token})
 		}},
+		// A sibling subdomain can plant an unprefixed cookie but not a
+		// __Host- one, so only the prefixed name may carry the flow.
+		{name: "flow cookie without host prefix", reason: "invalid login flow", status: 400, before: func(h *harness, r *http.Request) {
+			c, err := r.Cookie(h.o.flowCookie)
+			if err != nil {
+				h.t.Fatal(err)
+			}
+			r.Header.Del("Cookie")
+			r.AddCookie(&http.Cookie{Name: flowCookie, Value: c.Value})
+		}},
+		{name: "session too large", reason: "token exceeds size limit", status: 500,
+			idp: claims(func(c map[string]any) {
+				c["sub"] = strings.Repeat("<", 255)
+				c["name"] = strings.Repeat("<", maxNameRunes)
+				c["email"] = "a@" + longDomain
+				c["hd"] = longDomain
+			}),
+			before: func(h *harness, _ *http.Request) { h.o.domains = append(h.o.domains, longDomain) },
+		},
 		{name: "provider error", reason: "provider returned no code", status: 403, before: func(_ *harness, r *http.Request) {
 			r.URL.RawQuery = url.Values{
 				"state":             {r.URL.Query().Get("state")},
@@ -498,7 +530,7 @@ func TestCallbackRejects(t *testing.T) {
 			if c := findCookie(res, h.o.sessionCookie); c != nil {
 				t.Errorf("session cookie set: %+v", c)
 			}
-			if c := findCookie(res, flowCookie); c == nil || c.MaxAge >= 0 {
+			if c := findCookie(res, h.o.flowCookie); c == nil || c.MaxAge >= 0 {
 				t.Errorf("flow cookie not deleted: %+v", c)
 			}
 			if res.Header.Get("Cache-Control") != "no-store" || res.Header.Get("Referrer-Policy") != "no-referrer" {
@@ -599,7 +631,7 @@ func TestDiscoveryIsLazyAndRetried(t *testing.T) {
 	h.idp.set(func(idp *fakeIDP) { idp.failDiscovery = 1 })
 
 	res := serve(h.o.Login, httptest.NewRequest("GET", "/auth/login", nil))
-	if res.StatusCode != http.StatusServiceUnavailable || findCookie(res, flowCookie) != nil {
+	if res.StatusCode != http.StatusServiceUnavailable || findCookie(res, h.o.flowCookie) != nil {
 		t.Errorf("login during outage = %d, cookies %v", res.StatusCode, res.Cookies())
 	}
 	for range 2 {
@@ -609,6 +641,41 @@ func TestDiscoveryIsLazyAndRetried(t *testing.T) {
 	}
 	if n := h.idp.discoveries.Load(); n != 2 {
 		t.Errorf("discovery requests = %d, want 2 (one failed, one cached)", n)
+	}
+}
+
+func TestDiscoveryInProgressFailsFast(t *testing.T) {
+	h := newHarness(t, "http://localhost:5173")
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	h.idp.set(func(idp *fakeIDP) { idp.discoveryEntered, idp.discoveryRelease = entered, release })
+
+	login := func(out chan<- int) {
+		out <- serve(h.o.Login, httptest.NewRequest("GET", "/auth/login", nil)).StatusCode
+	}
+	first, second := make(chan int, 1), make(chan int, 1)
+	go login(first)
+	<-entered
+	go login(second)
+	select {
+	case code := <-second:
+		if code != http.StatusServiceUnavailable {
+			t.Errorf("login during discovery = %d, want 503", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("login queued behind a running discovery")
+	}
+
+	unblock()
+	if code := <-first; code != http.StatusFound {
+		t.Errorf("first login = %d, want 302", code)
+	}
+	if res := serve(h.o.Login, httptest.NewRequest("GET", "/auth/login", nil)); res.StatusCode != http.StatusFound {
+		t.Errorf("login after discovery = %d, want 302", res.StatusCode)
+	}
+	if n := h.idp.discoveries.Load(); n != 1 {
+		t.Errorf("discovery requests = %d, want 1", n)
 	}
 }
 
@@ -625,6 +692,14 @@ func TestSessionCookie(t *testing.T) {
 		b[len(b)/2] ^= 1
 		return string(b)
 	}
+	sealed := func(p sessionPayload) *http.Cookie {
+		token, err := h.o.session.seal(&p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Cookie{Name: sess.Name, Value: token}
+	}
+	exp := h.clock.now().Add(time.Hour)
 	forged := func() *http.Cookie {
 		raw, _ := base64.RawURLEncoding.DecodeString(strings.Split(sess.Value, ".")[0])
 		var p sessionPayload
@@ -647,6 +722,8 @@ func TestSessionCookie(t *testing.T) {
 		{"no signature", tamper(func(body, _ string) string { return body })},
 		{"oversized", tamper(func(body, sig string) string { return strings.Repeat("A", maxTokenLen) + body + "." + sig })},
 		{"unprefixed name", &http.Cookie{Name: sessionCookie, Value: sess.Value}},
+		{"version 1", sealed(sessionPayload{header: header{V: 1, Exp: exp.Unix()}, Sub: testSub, Name: "Ana", Domain: "example.com", HD: "example.com"})},
+		{"no domain", sealed(sessionPayload{header: newHeader(exp), Sub: testSub, Name: "Ana", HD: "example.com"})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -658,7 +735,7 @@ func TestSessionCookie(t *testing.T) {
 
 	t.Run("flow cookie as session", func(t *testing.T) {
 		res := serve(h.o.Login, httptest.NewRequest("GET", "/auth/login", nil))
-		flow := findCookie(res, flowCookie)
+		flow := findCookie(res, h.o.flowCookie)
 		if _, err := h.authenticate(&http.Cookie{Name: sess.Name, Value: flow.Value}); !errors.Is(err, ErrNoSession) {
 			t.Errorf("err = %v, want ErrNoSession", err)
 		}
@@ -711,6 +788,42 @@ func TestSessionCookie(t *testing.T) {
 	})
 }
 
+func TestSessionPayloadHasNoEmail(t *testing.T) {
+	h := newHarness(t, "https://office.example")
+	h.idp.set(func(idp *fakeIDP) {
+		idp.claims = func(c map[string]any) {
+			c["name"] = ""
+			c["email"] = "Ana.Lima@Example.COM"
+			c["hd"] = "example.com"
+		}
+	})
+	sess := h.login()
+	body, _, _ := strings.Cut(sess.Value, ".")
+	raw, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"v": float64(2), "exp": got["exp"], "sub": testSub, "name": "Ana.Lima", "domain": "example.com", "hd": "example.com",
+	}
+	if len(got) != len(want) || strings.Contains(string(raw), "@") {
+		t.Errorf("payload = %s, want only %v", raw, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("payload[%q] = %v, want %v", k, got[k], v)
+		}
+	}
+	id, err := h.authenticate(sess)
+	if err != nil || id.Name != "Ana.Lima" {
+		t.Errorf("identity = %+v, %v", id, err)
+	}
+}
+
 func TestLogout(t *testing.T) {
 	h := newHarness(t, "https://office.example")
 	res := serve(h.o.Logout, httptest.NewRequest("POST", "/auth/logout", nil))
@@ -724,7 +837,7 @@ func TestLogout(t *testing.T) {
 }
 
 func TestAuthorize(t *testing.T) {
-	allowed := []string{"example.com", "example.org"}
+	allowed := []string{"example.com", "example.org", "kempresa.com"}
 	ok := idClaims{Sub: testSub, Email: testEmail, EmailVerified: true, HD: "example.com"}
 	with := func(f func(*idClaims)) idClaims {
 		c := ok
@@ -749,6 +862,10 @@ func TestAuthorize(t *testing.T) {
 		{"no email", with(func(c *idClaims) { c.Email = "" }), true, errEmailDomain},
 		{"no local part", with(func(c *idClaims) { c.Email = "@example.com" }), true, errEmailDomain},
 		{"email too long", with(func(c *idClaims) { c.Email = strings.Repeat("a", 250) + "@example.com" }), true, errEmailDomain},
+		{"ascii uppercase K", with(func(c *idClaims) { c.Email, c.HD = "a@Kempresa.com", "Kempresa.com" }), true, nil},
+		{"kelvin sign in email", with(func(c *idClaims) { c.Email, c.HD = "a@\u212Aempresa.com", "kempresa.com" }), true, errEmailDomain},
+		{"kelvin sign in hd", with(func(c *idClaims) { c.Email, c.HD = "a@kempresa.com", "\u212Aempresa.com" }), true, errHDDomain},
+		{"non-ascii local part", with(func(c *idClaims) { c.Email = "jos\u00e9@example.com" }), true, errEmailDomain},
 		{"not verified", with(func(c *idClaims) { c.EmailVerified = false }), true, errEmailNotVerified},
 		{"no subject", with(func(c *idClaims) { c.Sub = "" }), true, errSubject},
 		{"subject with space", with(func(c *idClaims) { c.Sub = "a b" }), true, errSubject},

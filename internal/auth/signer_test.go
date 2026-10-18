@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,12 @@ func TestSigner(t *testing.T) {
 		t.Fatalf("round trip = %+v, %v", got, err)
 	}
 
+	if _, err := s.seal(&testPayload{header: valid.header, Data: strings.Repeat("x", maxTokenLen)}); !errors.Is(err, errTokenTooLong) {
+		t.Errorf("seal of oversized payload = %v, want errTokenTooLong", err)
+	}
+	long := strings.Repeat("A", maxTokenLen)
+	long += "." + b64(s.mac(long))
+
 	tests := []struct {
 		name   string
 		signer signer
@@ -43,9 +50,10 @@ func TestSigner(t *testing.T) {
 	}{
 		{"other purpose", other, seal(valid), now},
 		{"expired", s, seal(valid), now.Add(time.Minute)},
-		{"wrong version", s, seal(testPayload{header: header{V: 2, Exp: valid.Exp}}), now},
+		{"previous version", s, seal(testPayload{header: header{V: 1, Exp: valid.Exp}}), now},
+		{"next version", s, seal(testPayload{header: header{V: 3, Exp: valid.Exp}}), now},
 		{"no expiry", s, seal(testPayload{header: header{V: tokenVersion}}), now},
-		{"too long", s, seal(testPayload{header: valid.header, Data: strings.Repeat("x", maxTokenLen)}), now},
+		{"too long", s, long, now},
 		{"empty", s, "", now},
 		{"bad base64", s, "!!.!!", now},
 	}

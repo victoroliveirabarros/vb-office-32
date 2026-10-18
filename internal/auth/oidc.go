@@ -12,7 +12,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -21,12 +23,11 @@ import (
 const (
 	GoogleIssuer = "https://accounts.google.com"
 
-	flowCookie     = "vb_office32_oidc"
-	flowCookiePath = "/auth/"
-	flowTTL        = 10 * time.Minute
-	httpTimeout    = 10 * time.Second
-	maxEmailLen    = 254
-	minSessionKey  = 32
+	flowCookie    = "vb_office32_oidc"
+	flowTTL       = 10 * time.Minute
+	httpTimeout   = 10 * time.Second
+	maxEmailLen   = 254
+	minSessionKey = 32
 )
 
 var (
@@ -35,6 +36,7 @@ var (
 	errEmailDomain      = errors.New("email domain not allowed")
 	errHDMissing        = errors.New("hd claim missing")
 	errHDDomain         = errors.New("hd domain not allowed")
+	errDiscoveryBusy    = errors.New("discovery already in progress")
 )
 
 type OIDCConfig struct {
@@ -61,14 +63,15 @@ type OIDC struct {
 	requireHD     bool
 	secure        bool
 	sessionCookie string
+	flowCookie    string
 	session       signer
 	flow          signer
 	client        *http.Client
 	log           *slog.Logger
 	now           func() time.Time
 
-	mu        sync.Mutex
-	endpoints *endpoints
+	discovering sync.Mutex
+	endpoints   atomic.Pointer[endpoints]
 }
 
 type endpoints struct {
@@ -125,6 +128,7 @@ func NewOIDC(cfg OIDCConfig) (*OIDC, error) {
 		requireHD:     cfg.Issuer == GoogleIssuer,
 		secure:        strings.HasPrefix(cfg.PublicURL, "https://"),
 		sessionCookie: sessionCookie,
+		flowCookie:    flowCookie,
 		session:       session,
 		flow:          flow,
 		client:        &http.Client{Timeout: httpTimeout},
@@ -133,18 +137,25 @@ func NewOIDC(cfg OIDCConfig) (*OIDC, error) {
 	}
 	if o.secure {
 		o.sessionCookie = hostPrefix + sessionCookie
+		o.flowCookie = hostPrefix + flowCookie
 	}
 	return o, nil
 }
 
 // discover fetches provider metadata once it succeeds; failures are retried
 // on the next login so a provider that is briefly unreachable at boot does
-// not need a restart.
+// not need a restart. Requests that arrive while a discovery is running fail
+// at once instead of queueing behind its network I/O.
 func (o *OIDC) discover(ctx context.Context) (*endpoints, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.endpoints != nil {
-		return o.endpoints, nil
+	if ep := o.endpoints.Load(); ep != nil {
+		return ep, nil
+	}
+	if !o.discovering.TryLock() {
+		return nil, errDiscoveryBusy
+	}
+	defer o.discovering.Unlock()
+	if ep := o.endpoints.Load(); ep != nil {
+		return ep, nil
 	}
 	p, err := oidc.NewProvider(oidc.ClientContext(ctx, o.client), o.issuer)
 	if err != nil {
@@ -154,7 +165,7 @@ func (o *OIDC) discover(ctx context.Context) (*endpoints, error) {
 	// refused exchange with the secret in the body.
 	endpoint := p.Endpoint()
 	endpoint.AuthStyle = oauth2.AuthStyleInHeader
-	o.endpoints = &endpoints{
+	ep := &endpoints{
 		oauth: oauth2.Config{
 			ClientID:     o.clientID,
 			ClientSecret: o.clientSecret,
@@ -167,7 +178,8 @@ func (o *OIDC) discover(ctx context.Context) (*endpoints, error) {
 			Now:      func() time.Time { return o.now() },
 		}),
 	}
-	return o.endpoints, nil
+	o.endpoints.Store(ep)
+	return ep, nil
 }
 
 func (o *OIDC) Login(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +202,7 @@ func (o *OIDC) Login(w http.ResponseWriter, r *http.Request) {
 		writePage(w, http.StatusInternalServerError, "Erro interno.")
 		return
 	}
-	http.SetCookie(w, o.cookie(flowCookie, flowCookiePath, token, int(flowTTL.Seconds())))
+	http.SetCookie(w, o.cookie(o.flowCookie, token, int(flowTTL.Seconds())))
 
 	opts := []oauth2.AuthCodeOption{oidc.Nonce(f.Nonce), oauth2.S256ChallengeOption(f.Verifier)}
 	if o.requireHD && len(o.domains) == 1 {
@@ -204,11 +216,11 @@ func (o *OIDC) Login(w http.ResponseWriter, r *http.Request) {
 func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	http.SetCookie(w, o.cookie(flowCookie, flowCookiePath, "", -1))
+	http.SetCookie(w, o.cookie(o.flowCookie, "", -1))
 
 	var f flowPayload
 	q := r.URL.Query()
-	c, err := r.Cookie(flowCookie)
+	c, err := r.Cookie(o.flowCookie)
 	if err != nil || o.flow.open(c.Value, o.now(), &f) != nil ||
 		subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(f.State)) != 1 {
 		o.log.Info("login rejected", "reason", "invalid login flow")
@@ -291,11 +303,12 @@ func authorize(c idClaims, allowed []string, requireHD bool) error {
 	if !c.EmailVerified {
 		return errEmailNotVerified
 	}
-	return checkDomains(c.Email, c.HD, allowed, requireHD)
+	return checkDomains(emailDomain(c.Email), c.HD, allowed, requireHD)
 }
 
-func checkDomains(email, hd string, allowed []string, requireHD bool) error {
-	if len(email) > maxEmailLen || !slices.Contains(allowed, emailDomain(email)) {
+// checkDomains takes the email domain already normalized by emailDomain.
+func checkDomains(domain, hd string, allowed []string, requireHD bool) error {
+	if !slices.Contains(allowed, domain) {
 		return errEmailDomain
 	}
 	if hd == "" {
@@ -304,18 +317,31 @@ func checkDomains(email, hd string, allowed []string, requireHD bool) error {
 		}
 		return nil
 	}
-	if !slices.Contains(allowed, strings.ToLower(hd)) {
+	if !isASCII(hd) || !slices.Contains(allowed, strings.ToLower(hd)) {
 		return errHDDomain
 	}
 	return nil
 }
 
+// emailDomain returns the lowercase domain after the last '@', or "" for an
+// address that is malformed, too long or not ASCII. strings.ToLower folds
+// some non-ASCII runes into ASCII (the Kelvin sign becomes 'k'), so those
+// are refused before lowering.
 func emailDomain(email string) string {
 	i := strings.LastIndexByte(email, '@')
-	if i <= 0 {
+	if i <= 0 || len(email) > maxEmailLen || !isASCII(email) {
 		return ""
 	}
 	return strings.ToLower(email[i+1:])
+}
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 func noStore(w http.ResponseWriter) {

@@ -22,10 +22,10 @@ var ErrNoSession = errors.New("no valid session")
 
 type sessionPayload struct {
 	header
-	Sub   string `json:"sub"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	HD    string `json:"hd,omitempty"`
+	Sub    string `json:"sub"`
+	Name   string `json:"name"`
+	Domain string `json:"domain"`
+	HD     string `json:"hd,omitempty"`
 }
 
 // Authenticate reads the session cookie. Domains are checked again on every
@@ -39,36 +39,39 @@ func (o *OIDC) Authenticate(r *http.Request) (Identity, error) {
 	if err := o.session.open(c.Value, o.now(), &p); err != nil {
 		return Identity{}, ErrNoSession
 	}
-	if checkDomains(p.Email, p.HD, o.domains, o.requireHD) != nil || !validSubject(p.Sub) {
+	if checkDomains(p.Domain, p.HD, o.domains, o.requireHD) != nil || !validSubject(p.Sub) {
 		return Identity{}, ErrNoSession
 	}
 	return Identity{ID: oidcIdentPrefix + p.Sub, Name: p.Name, Expires: time.Unix(p.Exp, 0)}, nil
 }
 
+// setSession keeps only the email domain; the display name fallback is taken
+// from the email here, before it is discarded.
 func (o *OIDC) setSession(w http.ResponseWriter, c idClaims) error {
 	token, err := o.session.seal(&sessionPayload{
 		header: newHeader(o.now().Add(sessionTTL)),
 		Sub:    c.Sub,
 		Name:   displayName(c.Name, c.Email),
-		Email:  c.Email,
+		Domain: emailDomain(c.Email),
 		HD:     c.HD,
 	})
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, o.cookie(o.sessionCookie, "/", token, int(sessionTTL.Seconds())))
+	http.SetCookie(w, o.cookie(o.sessionCookie, token, int(sessionTTL.Seconds())))
 	return nil
 }
 
 func (o *OIDC) clearSession(w http.ResponseWriter) {
-	http.SetCookie(w, o.cookie(o.sessionCookie, "/", "", -1))
+	http.SetCookie(w, o.cookie(o.sessionCookie, "", -1))
 }
 
-func (o *OIDC) cookie(name, path, value string, maxAge int) *http.Cookie {
+// cookie always uses Path=/ because the __Host- prefix requires it.
+func (o *OIDC) cookie(name, value string, maxAge int) *http.Cookie {
 	return &http.Cookie{
 		Name:     name,
 		Value:    value,
-		Path:     path,
+		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   o.secure,
