@@ -2,13 +2,16 @@
 
 A small virtual office: a tile map where teammates walk around in
 real time. The Go server is authoritative; the browser client lives in `web/`.
+Proximity audio and video go through a self-hosted LiveKit server: the Go
+server decides who is near whom and hands out tokens (the browser side is
+in progress).
 
 ## Run
 
 ```sh
 cp .env.example .env   # make loads it; it logs in through the development IdP
 sed -i "s|^VB_OFFICE32_SESSION_KEY=.*|VB_OFFICE32_SESSION_KEY=$(openssl rand -base64 32)|" .env
-make dev-oidc          # devidp on :9000, server on :8080, Vite on :5173
+make dev-oidc          # devidp :9000, server :8080, Vite :5173, LiveKit :7880 (Docker)
 ```
 
 Open http://localhost:5173 and click "Entrar". For guest mode instead,
@@ -37,10 +40,30 @@ and no `$`.
 | `VB_OFFICE32_OIDC_CLIENT_SECRET` | with oidc | —                             | yes    | OAuth client secret, sent with HTTP Basic (`client_secret_basic`). |
 | `VB_OFFICE32_ALLOWED_DOMAINS`    | with oidc | —                             | no     | Comma-separated email domains allowed in, e.g. `example.com,example.org`. |
 | `VB_OFFICE32_SESSION_KEY`        | with oidc | —                             | yes    | Base64 of at least 32 random bytes (`openssl rand -base64 32`). Signs the session and login cookies; changing it logs everyone out. |
+| `VB_OFFICE32_LIVEKIT_URL`        | for media | —                             | no     | LiveKit URL the browser connects to, `wss://host[:port]` without path; `ws` only for `localhost`/`127.0.0.1`. |
+| `VB_OFFICE32_LIVEKIT_API_KEY`    | for media | —                             | no     | LiveKit API key (it goes in every token, so it is not secret). |
+| `VB_OFFICE32_LIVEKIT_API_SECRET` | for media | —                             | yes    | LiveKit API secret; under 32 characters only logs a warning, for the development `secret`. |
 
 Invalid values stop the server at boot with an error naming the variable,
 never its value. The OIDC provider itself is contacted on the first login,
-not at boot.
+not at boot. The three LiveKit variables go together: all of them turn media
+on, none turns it off, and a partial set is an error.
+
+## Audio and video
+
+With the LiveKit variables set, each player gets a LiveKit token right after
+`welcome` (`media`) and the set of players within earshot (`nearby`): a pair
+becomes near at 4 tiles and stops at more than 5. Tokens last 10 minutes and
+are reissued every 5; the server never logs them. Network, cost and a
+minimal LiveKit configuration are in [`docs/livekit.md`](docs/livekit.md).
+
+```sh
+make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networking
+```
+
+`.env.example` carries the matching variables, and `make dev-oidc` also
+starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is set. In guest mode run
+`make livekit`, `make run` and `make web-dev`.
 
 ## Login
 
@@ -101,6 +124,9 @@ make test        # go test -race ./...
 make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
+
+# token check against a running LiveKit (make livekit)
+VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media
 ```
 
 The wire protocol and map format are specified in

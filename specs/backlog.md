@@ -15,10 +15,16 @@ Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisõ
 - `client_secret_post` para provedores que não aceitem `client_secret_basic` (hoje fixo em Basic).
 - M6 — DNS rebinding no proxy WS do Vite em dev: requisição com `Host`/`Origin` = `evil.com:5173` recebe 101 no `/ws` (o proxy preserva o Host e o check de Origin compara Origin com Host). Em `AUTH=oidc` o upgrade dá 401; em `guest` qualquer um já entra. Só dev; corrigir com `server.allowedHosts` no Vite ou checagem de Host no proxy.
 
-## Fase 3
+## Fase 3a — servidor de mídia (feito)
 
-- Envs LiveKit: `VB_OFFICE32_LIVEKIT_URL`, `VB_OFFICE32_LIVEKIT_API_KEY` (segredo), `VB_OFFICE32_LIVEKIT_API_SECRET` (segredo).
-- Métricas Prometheus (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack, logins negados por motivo).
+Escopo e decisões em [`phase3.md`](phase3.md). Envs `VB_OFFICE32_LIVEKIT_URL`, `VB_OFFICE32_LIVEKIT_API_KEY` (não é segredo: vai no `iss`), `VB_OFFICE32_LIVEKIT_API_SECRET` (segredo) no README e em `docs/livekit.md`; mensagens `media`/`nearby` e regra de proximidade em `phase1-protocol.md`.
+
+## Depois da fase 3a
+
+- `RemoveParticipant` (Twirp, stdlib) no leave, com carência de ~30 s para reconexão: revogação real de quem perde o WS, já que o LiveKit renova o token da sessão conectada indefinidamente.
+- Permissões de trilha do publicador (`setTrackSubscriptionPermissions`) como enforcement barato de quem assina quem (fase 5, junto com zonas).
+- CSP `connect-src` incluindo a URL do LiveKit (junto com os demais headers de segurança).
+- Métricas Prometheus em fase posterior (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack, logins negados por motivo, mídia emitida).
 
 ## Descartado
 

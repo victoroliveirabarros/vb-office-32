@@ -84,6 +84,22 @@ Notes:
   sessions on their next request; rotating `VB_OFFICE32_SESSION_KEY` logs
   everyone out.
 
+## Audio and video (optional)
+
+Proximity audio and video need a LiveKit server next to this one; see
+[`livekit.md`](livekit.md) for its network, configuration and cost. Point
+vb-office-32 at it with:
+
+| Variable | Example | Secret |
+|---|---|---|
+| `VB_OFFICE32_LIVEKIT_URL` | `wss://media.example.com` | no |
+| `VB_OFFICE32_LIVEKIT_API_KEY` | the key configured in LiveKit | no |
+| `VB_OFFICE32_LIVEKIT_API_SECRET` | the matching secret | yes |
+
+Set all three or none. vb-office-32 never calls LiveKit: it only signs
+tokens, so it needs no egress to it, but the browser does. Deliver the
+secret like the other secrets above.
+
 ## Port and probes
 
 | Port | Name   | Protocol |

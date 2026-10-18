@@ -68,6 +68,24 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 | `left` | `{ id: string }` | Jogador saiu. |
 | `state` | `{ tick: number, ack: number, players: Pos[] }` | Fim de tick em que houve mudança OU o `ack` do destinatário avançou. `players` = só quem mudou posição/direção no tick. `ack` = último `seq` processado do destinatário (0 se nenhum). |
 | `pong` | `{ ts: number }` | Resposta a `ping`. |
+| `media` | `{ url: string, token: string, expiresAt: number }` | Só com mídia configurada. Logo após `welcome` e reemitido a cada 5 min. `url` = URL WS do LiveKit; `token` = JWT de acesso (TTL 10 min); `expiresAt` = expiração do token em unix **ms**. |
+| `nearby` | `{ ids: string[] }` | Só com mídia configurada. Logo após `media` (mesmo vazio) e no fim de todo tick em que o conjunto do destinatário mudou (depois do `state` desse tick, se houver). Conjunto audível completo, ordenado, sem o próprio. |
+
+Ordem ao conectar com mídia: `welcome` → `media` → `nearby`; só então os outros recebem `joined`. Sem mídia configurada o servidor nunca envia `media` nem `nearby`; clientes antigos ignoram tipos desconhecidos.
+
+## Proximidade (mídia)
+
+- Distância euclidiana em tiles, em inteiros: `d² = dx² + dy²`.
+- Par entra no conjunto com `d² ≤ 16` (4 tiles) e sai com `d² > 25` (5 tiles); `16 < d² ≤ 25` mantém o estado anterior (histerese).
+- Simétrica: A está no conjunto de B ⇔ B está no de A. Paredes não bloqueiam.
+- Calculada no tick: só posição conta (virar não muda nada). Jogador novo é avaliado no tick seguinte à entrada, por isso o primeiro `nearby` dele vem vazio; reconexão da mesma identidade mantém o conjunto. Quem sai é removido dos vizinhos, que recebem `nearby` no tick seguinte.
+- Volume (cliente, fase 3b): 1,0 em `d ≤ 1`, linear até 0,2 em `d = 4`, 0,2 na faixa de histerese, 0 fora do conjunto.
+
+### Token LiveKit
+
+- JWT HS256 assinado com o segredo da API LiveKit. Claims: `iss` = API key, `sub` = ID do jogador, `name` = nome de exibição, `nbf`, `iat`, `exp`, `video`.
+- `video`: `{"room":"<espaço>","roomJoin":true,"canPublish":true,"canPublishSources":["microphone","camera"],"canSubscribe":true,"canPublishData":false,"canUpdateOwnMetadata":false}`.
+- O LiveKit renova sozinho o token de quem está conectado; o `media` novo só serve para um `connect` futuro. O cliente nunca reconecta a sala ao receber `media`.
 
 ## Regras de movimento (servidor autoritativo)
 
