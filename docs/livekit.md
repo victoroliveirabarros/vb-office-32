@@ -33,8 +33,8 @@ space (`office`), with the player ID as identity and the display name as
 name. It may join, publish microphone and camera, and subscribe; it may not
 publish data, change its own metadata or administer the room.
 
-Tokens last 10 minutes and the server sends a new `media` message every
-5 minutes. A connected participant does not need them: LiveKit refreshes
+Tokens last 10 minutes and the server sends a new `media` message about
+every 5 minutes (it checks once a minute). A connected participant does not need them: LiveKit refreshes
 its token over the signaling connection by itself. The latest token is only
 used to connect again after a drop.
 
@@ -51,7 +51,7 @@ LiveKit needs a stable public IP that browsers reach directly:
 
 | Port | Protocol | Purpose |
 |---|---|---|
-| 7880 | TCP | Signaling (WebSocket) and HTTP API. Put it behind a TLS proxy. |
+| 7880 | TCP | Signaling (WebSocket) and HTTP API. Only the TLS proxy may reach it. |
 | 7882 | UDP | Media for every participant, multiplexed on one port. |
 | 7881 | TCP | Media fallback (ICE over TCP) for networks that block UDP. |
 | 443 | TCP | Optional TURN/TLS, for networks that only allow HTTPS. |
@@ -70,10 +70,17 @@ LiveKit needs a stable public IP that browsers reach directly:
   `wss://`. Terminate TLS for the media host name at a reverse proxy (or a
   TLS load balancer) and forward to 7880 with WebSocket upgrades allowed and
   an idle timeout of a few minutes.
+- **Close 7880 to the internet.** Host networking exposes every port
+  LiveKit binds, so the firewall or security group must let only the TLS
+  proxy reach 7880 (and keep the Prometheus port private); otherwise the
+  signaling and HTTP API are reachable in plain text, around the proxy.
+- **Do not log query strings at the proxy.** The SDK sends the access token
+  in the query (`/rtc?access_token=…`), so access logs that keep the full
+  URL store valid tokens. Log the path only.
 - **TURN/TLS on 443** helps clients behind strict firewalls. It needs its
-  own host name and certificate (`turn.domain`, `turn.tls_port`), and it
-  relays media through the server, which costs bandwidth. Leave it off until
-  someone needs it.
+  own host name and certificate (`turn.domain`, `turn.tls_port`). The media
+  goes through the server either way, so it adds little egress; the cost is
+  mostly CPU for TLS and relaying. Leave it off until someone needs it.
 - One node is enough for one office; a cluster needs Redis and is out of
   scope here.
 
@@ -104,7 +111,10 @@ docker run -d --name livekit --network host --restart unless-stopped \
 ```
 
 Deliver the secret from a secret store to both LiveKit and vb-office-32.
-Rotating it means changing both; connected participants keep their sessions.
+LiveKit reads `LIVEKIT_KEYS` only at boot, so rotating the secret means
+restarting both. On a single node the LiveKit restart drops every media
+connection; clients connect again with the token from the next `media`
+message, which the restarted vb-office-32 signs with the new secret.
 
 ## Cost
 
@@ -144,7 +154,7 @@ make livekit   # LiveKit --dev on :7880 with key devkey and secret secret
 
 `.env.example` has the matching block (`ws://localhost:7880`, `devkey`,
 `secret`), and `make dev-oidc` starts LiveKit too when
-`VB_OFFICE32_LIVEKIT_URL` is set. In guest mode run `make livekit`,
+`VB_OFFICE32_LIVEKIT_URL` points at `ws://localhost` or `ws://127.0.0.1`. In guest mode run `make livekit`,
 `make run` and `make web-dev`. The browser connects to LiveKit directly;
 Vite does not proxy it.
 

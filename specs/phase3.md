@@ -102,14 +102,14 @@ Versões conferidas em 2026-10-18: livekit-server v1.13.10 (imagem `livekit/live
 - **Stdlib** HS256 (sem `livekit/protocol` nem server-sdk-go — grafo pesado). Header `{"alg":"HS256","typ":"JWT"}`, base64url sem padding, HMAC com **bytes crus** do segredo.
 - Claims: `iss`=api key, `sub`=identity, `name`, `nbf`, `iat`, `exp`, `video`.
 - Grants exatos (bools **sem** omitempty): `{"room":"office","roomJoin":true,"canPublish":true,"canPublishSources":["microphone","camera"],"canSubscribe":true,"canPublishData":false,"canUpdateOwnMetadata":false}`. `canPublishData:false` explícito (ausente herda `canPublish`).
-- **TTL 10 min, reemitido a cada 5 min.** O LiveKit renova o token da sessão conectada sozinho (refresh a cada 5 min pela sinalização); nosso token só serve para `connect` novo. Cliente nunca reconecta o Room ao receber `media` novo.
-- Interface no consumidor (`realtime`): `MediaIssuer{ Issue(identity, name, room string, now time.Time) (MediaGrant, error) }`, `MediaGrant{URL, Token string; ExpiresAt time.Time}`; nil desliga mídia.
+- **TTL 10 min, reemitido a cada ~5 min** (na primeira verificação do ticker de 1 min após a metade do TTL). O LiveKit renova o token da sessão conectada sozinho (refresh a cada 5 min pela sinalização); nosso token só serve para `connect` novo. Cliente nunca reconecta o Room ao receber `media` novo.
+- O tipo vive em `media`: `media.Grant{URL, Token string; ExpiresAt time.Time}`, devolvido por `*media.Issuer`. A interface fica no consumidor (`realtime`): `MediaIssuer{ Issue(identity, name, room string, now time.Time) (media.Grant, error) }`; nil desliga mídia.
 - Testes: decodificar e validar header/HMAC/JSON exato/`exp-nbf`. Integração pulável com `VB_OFFICE32_LIVEKIT_TEST_URL`: `GET {url}/rtc/validate?access_token=…` → 200; segredo errado/expirado/sem roomJoin → 401. CI: job com `docker run -d --network host livekit/livekit-server:v1.13 --dev` + espera + `go test -run LiveKit ./internal/media`.
 
 ### Room/protocolo
 - Join: `welcome` → `media` → `nearby` (sempre, mesmo vazio) → broadcast `joined`.
 - Tick: `state` → `nearby` dos alterados. `tick()` não retorna cedo se `len(d.Nearby) > 0`.
-- Renovação: ticker de 1 min no `select` do `Room.Run` (canal nil sem mídia); reemite para membros com `renewAt` vencido; intervalo sobrescrevível em teste.
+- Renovação: ticker de 1 min no `select` do `Room.Run` (canal nil sem mídia); reemite para membros com `renewAt` vencido; testado com relógio falso (`testing/synctest`).
 - `media`: `{url, token, expiresAt}` com `expiresAt` em unix **ms**. `nearby`: `{ids}` ordenado, sem o próprio.
 - Space calcula proximidade sempre; Room só envia com mídia configurada.
 - Nunca logar token.
@@ -121,7 +121,7 @@ Versões conferidas em 2026-10-18: livekit-server v1.13.10 (imagem `livekit/live
 
 ### Dev
 - `make livekit`: `docker run --rm --name vb-office-32-livekit --network host livekit/livekit-server:v1.13 --dev` (Linux). Documentar alternativa portável (`-p 7880 -p 7881 -p 7882/udp --bind 0.0.0.0 --node-ip …`).
-- `dev-oidc` inclui `livekit` só se `VB_OFFICE32_LIVEKIT_URL` definida.
+- `dev-oidc` inclui `livekit` só se `VB_OFFICE32_LIVEKIT_URL` for `ws://localhost[:porta]` ou `ws://127.0.0.1[:porta]`.
 - `.env.example`: bloco LiveKit dev (`ws://localhost:7880`, `devkey`, `secret`).
 - Browser conecta direto em `ws://localhost:7880` (sem proxy no Vite).
 

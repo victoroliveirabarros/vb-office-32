@@ -54,7 +54,8 @@ on, none turns it off, and a partial set is an error.
 With the LiveKit variables set, each player gets a LiveKit token right after
 `welcome` (`media`) and the set of players within earshot (`nearby`): a pair
 becomes near at 4 tiles and stops at more than 5. Tokens last 10 minutes and
-are reissued every 5; the server never logs them. Network, cost and a
+are reissued about every 5 (the server checks once a minute); the server
+never logs them. Network, cost and a
 minimal LiveKit configuration are in [`docs/livekit.md`](docs/livekit.md).
 
 In the browser the LiveKit SDK loads only when the first `media` arrives.
@@ -70,7 +71,8 @@ make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networki
 ```
 
 `.env.example` carries the matching variables, and `make dev-oidc` also
-starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is set. In guest mode run
+starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is `ws://localhost` or
+`ws://127.0.0.1`. In guest mode run
 `make livekit`, `make run` and `make web-dev`.
 
 ## Login
