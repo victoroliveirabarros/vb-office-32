@@ -16,7 +16,8 @@ import (
 
 const (
 	shutdownTimeout = 5 * time.Second
-	// mediaCheck is how often grants due for renewal are reissued.
+	// mediaCheck is how often grants due for renewal are reissued and the
+	// media room is reconciled with the members.
 	mediaCheck = time.Minute
 	// removeGrace is how long an identity that left keeps its media
 	// connection, so a reconnecting WebSocket does not drop the call.
@@ -29,7 +30,8 @@ var errRoomClosed = errors.New("room closed")
 // media off.
 type Media interface {
 	Issue(identity, name, room string, now time.Time) (media.Grant, error)
-	Remove(ctx context.Context, room, identity string) error
+	Remove(ctx context.Context, room, identity string) (bool, error)
+	Participants(ctx context.Context, room string) ([]string, error)
 }
 
 type member struct {
@@ -65,12 +67,17 @@ type Room struct {
 	leaves   chan *Session
 	inputs   chan sessionInput
 	removals chan removal
+	listed   chan []string
+	arrived  chan string
+	removed  chan string
 	done     chan struct{}
 	members  map[string]*member
 
-	pending  map[string]removal
-	seq      uint64
-	removing sync.WaitGroup
+	pending    map[string]removal
+	seq        uint64
+	listing    bool
+	removing   sync.WaitGroup
+	checkEvery time.Duration
 }
 
 func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *Room {
@@ -84,9 +91,14 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 		leaves:   make(chan *Session),
 		inputs:   make(chan sessionInput, 256),
 		removals: make(chan removal),
+		listed:   make(chan []string),
+		arrived:  make(chan string),
+		removed:  make(chan string),
 		done:     make(chan struct{}),
 		members:  make(map[string]*member),
 		pending:  make(map[string]removal),
+
+		checkEvery: mediaCheck,
 	}
 }
 
@@ -94,11 +106,11 @@ func (r *Room) Run(ctx context.Context) error {
 	defer close(r.done)
 	ticker := time.NewTicker(world.TickInterval)
 	defer ticker.Stop()
-	var renew <-chan time.Time
+	var check <-chan time.Time
 	if r.media != nil {
-		t := time.NewTicker(mediaCheck)
+		t := time.NewTicker(r.checkEvery)
 		defer t.Stop()
-		renew = t.C
+		check = t.C
 	}
 
 	for {
@@ -114,10 +126,16 @@ func (r *Room) Run(ctx context.Context) error {
 			r.handleInput(in)
 		case rm := <-r.removals:
 			r.handleRemoval(ctx, rm)
+		case ids := <-r.listed:
+			r.handleListed(ctx, ids)
+		case id := <-r.arrived:
+			r.handleArrived(ctx, id)
+		case id := <-r.removed:
+			r.handleRemoved(id)
 		case now := <-ticker.C:
 			r.tick(now)
-		case now := <-renew:
-			r.renewMedia(now)
+		case now := <-check:
+			r.checkMedia(ctx, now)
 		}
 	}
 }
@@ -239,22 +257,87 @@ func (r *Room) cancelRemoval(id string) {
 	}
 }
 
-// handleRemoval runs the call outside the room goroutine so a slow media
-// server never delays a tick.
 func (r *Room) handleRemoval(ctx context.Context, rm removal) {
 	if p, ok := r.pending[rm.id]; !ok || p.seq != rm.seq {
 		return
 	}
 	delete(r.pending, rm.id)
+	r.remove(ctx, rm.id)
+}
+
+// checkMedia renews the grants due and lists the media room, one list at a
+// time: a removed client may join again with a token it still holds.
+func (r *Room) checkMedia(ctx context.Context, now time.Time) {
+	r.renewMedia(now)
+	if r.listing {
+		return
+	}
+	r.listing = true
 	r.removing.Go(func() {
-		if err := r.media.Remove(ctx, r.id, rm.id); err != nil {
-			if ctx.Err() == nil {
-				r.log.Warn("media removal failed", "id", rm.id, "err", err)
-			}
-			return
+		ids, err := r.media.Participants(ctx, r.id)
+		if err != nil && ctx.Err() == nil {
+			r.log.Warn("list media participants failed", "err", err)
 		}
-		r.log.Info("removed from media", "id", rm.id)
+		_ = submit(ctx, r, r.listed, ids)
 	})
+}
+
+// handleListed removes every identity in the media room that is neither a
+// member nor within its grace period, ours or not. It decides on the members
+// of now, not of when the list was asked for.
+func (r *Room) handleListed(ctx context.Context, ids []string) {
+	r.listing = false
+	for _, id := range ids {
+		if r.stale(id) {
+			r.log.Info("stale media participant", "id", id)
+			r.remove(ctx, id)
+		}
+	}
+}
+
+// mediaArrived reports that identity became active in the media room.
+func (r *Room) mediaArrived(ctx context.Context, id string) error {
+	return submit(ctx, r, r.arrived, id)
+}
+
+func (r *Room) handleArrived(ctx context.Context, id string) {
+	if r.media != nil && r.stale(id) {
+		r.log.Info("media participant without session", "id", id)
+		r.remove(ctx, id)
+	}
+}
+
+func (r *Room) stale(id string) bool {
+	_, member := r.members[id]
+	_, pending := r.pending[id]
+	return !member && !pending
+}
+
+// remove runs the call outside the room goroutine so a slow media server
+// never delays a tick.
+func (r *Room) remove(ctx context.Context, id string) {
+	r.removing.Go(func() {
+		found, err := r.media.Remove(ctx, r.id, id)
+		switch {
+		case found:
+			r.log.Info("removed from media", "id", id)
+		case err == nil:
+			r.log.Debug("already gone from media", "id", id)
+		case ctx.Err() == nil:
+			r.log.Warn("media removal failed", "id", id, "err", err)
+		}
+		_ = submit(ctx, r, r.removed, id)
+	})
+}
+
+// handleRemoved hands a new grant to an identity that came back while its
+// removal was in flight, since that removal may have dropped the new media
+// connection.
+func (r *Room) handleRemoved(id string) {
+	if m, ok := r.members[id]; ok {
+		r.log.Info("media reissued after removal", "id", id)
+		r.sendMedia(m, time.Now())
+	}
 }
 
 func (r *Room) handleInput(in sessionInput) {

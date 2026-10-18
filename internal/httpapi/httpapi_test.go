@@ -138,8 +138,8 @@ func TestSecurityHeaders(t *testing.T) {
 	ws := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 	ready := func() bool { return true }
 	const base = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
-		"media-src 'self' blob:; connect-src 'self'%s; font-src 'self'; object-src 'none'; base-uri 'none'; " +
-		"form-action 'self'%s; frame-ancestors 'none'"
+		"media-src 'self'; connect-src 'self'%s; font-src 'self'; object-src 'none'; base-uri 'none'; " +
+		"form-action 'self'; frame-ancestors 'none'"
 
 	tests := []struct {
 		name string
@@ -147,16 +147,15 @@ func TestSecurityHeaders(t *testing.T) {
 		csp  string
 		hsts bool
 	}{
-		{"guest without media", Options{}, fmt.Sprintf(base, "", ""), false},
+		{"guest without media", Options{}, fmt.Sprintf(base, ""), false},
 		{
 			"oidc with media over https",
 			Options{
 				OIDC:       fakeOIDC{},
 				ConnectSrc: []string{"wss://media.example", "https://media.example"},
-				FormAction: []string{"https://accounts.google.com"},
 				HSTS:       true,
 			},
-			fmt.Sprintf(base, " wss://media.example https://media.example", " https://accounts.google.com"),
+			fmt.Sprintf(base, " wss://media.example https://media.example"),
 			true,
 		},
 	}
@@ -198,4 +197,29 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Error("no Content-Security-Policy on an auth page")
 		}
 	})
+}
+
+func TestMediaWebhookRoute(t *testing.T) {
+	hook := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	opts := Options{Ready: func() bool { return true }, MapsDir: t.TempDir(), WebDir: t.TempDir()}
+	without := NewHandler(opts)
+	opts.MediaWebhook = hook
+	with := NewHandler(opts)
+
+	for _, tt := range []struct {
+		h      http.Handler
+		method string
+		want   int
+	}{
+		{with, http.MethodPost, http.StatusAccepted},
+		{with, http.MethodGet, http.StatusNotFound},
+		{without, http.MethodPost, http.StatusMethodNotAllowed},
+	} {
+		rec := httptest.NewRecorder()
+		// LiveKit sends neither Origin nor Sec-Fetch-Site.
+		tt.h.ServeHTTP(rec, httptest.NewRequest(tt.method, "/livekit/webhook", nil))
+		if rec.Code != tt.want {
+			t.Errorf("%s /livekit/webhook = %d, want %d", tt.method, rec.Code, tt.want)
+		}
+	}
 }

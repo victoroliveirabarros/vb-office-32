@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -60,6 +60,9 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	)
 	if cfg.auth == authOIDC {
 		cfg.oidc.Log = log
+		if cfg.oidc.PreviousSessionKey != nil && bytes.Equal(cfg.oidc.PreviousSessionKey, cfg.oidc.SessionKey) {
+			log.Warn("VB_OFFICE32_SESSION_KEY_PREVIOUS equals VB_OFFICE32_SESSION_KEY; set the new key before deploying a rotation")
+		}
 		o, err := auth.NewOIDC(cfg.oidc)
 		if err != nil {
 			return fmt.Errorf("oidc: %w", err)
@@ -71,11 +74,12 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 
 	var (
 		mi         realtime.Media
+		lkClient   *media.Client
 		connectSrc []string
-		formAction []string
 	)
 	if lk := cfg.livekit; lk.url != "" {
-		mi = media.NewClient(lk.url, lk.apiKey, lk.apiSecret)
+		lkClient = media.NewClient(lk.url, lk.apiKey, lk.apiSecret)
+		mi = lkClient
 		connectSrc = []string{lk.url, media.HTTPURL(lk.url)}
 		if len(lk.apiSecret) < minSecretLen {
 			log.Warn("VB_OFFICE32_LIVEKIT_API_SECRET is shorter than 32 characters; use a long random secret outside development")
@@ -83,21 +87,22 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	}
 
 	var ready atomic.Bool
-	if cfg.auth == authOIDC {
-		formAction = []string{origin(cfg.oidc.Issuer)}
-	}
 
 	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), mi, log))
 	ws := realtime.NewHandler(hub, authn, cfg.allowedOrigins, cfg.maxSessions, log)
+	var webhook http.Handler
+	if lkClient != nil {
+		webhook = realtime.NewWebhookHandler(hub, lkClient, log)
+	}
 	srv := httpapi.NewServer(httpapi.NewHandler(httpapi.Options{
-		WS:         ws,
-		Ready:      ready.Load,
-		MapsDir:    cfg.mapsDir,
-		WebDir:     cfg.webDir,
-		OIDC:       login,
-		ConnectSrc: connectSrc,
-		FormAction: formAction,
-		HSTS:       strings.HasPrefix(cfg.oidc.PublicURL, "https://"),
+		WS:           ws,
+		Ready:        ready.Load,
+		MapsDir:      cfg.mapsDir,
+		WebDir:       cfg.webDir,
+		OIDC:         login,
+		ConnectSrc:   connectSrc,
+		MediaWebhook: webhook,
+		HSTS:         strings.HasPrefix(cfg.oidc.PublicURL, "https://"),
 	}))
 	srv.ErrorLog = slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 
@@ -143,13 +148,4 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	}
 	log.Info("stopped")
 	return nil
-}
-
-// origin keeps the scheme and host of a URL loadConfig already validated.
-func origin(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
 }

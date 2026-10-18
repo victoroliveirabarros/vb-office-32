@@ -3,6 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -137,9 +140,9 @@ func TestRunOIDC(t *testing.T) {
 	if res.StatusCode != http.StatusUnauthorized || string(body) != `{"auth":"oidc"}`+"\n" {
 		t.Errorf("/api/session = %d %s", res.StatusCode, body)
 	}
-	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self' http://127.0.0.1:1;") ||
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self';") ||
 		!strings.Contains(csp, "connect-src 'self';") || res.Header.Get("Strict-Transport-Security") != "" {
-		t.Errorf("headers = %v, want the issuer in form-action and no HSTS over http", res.Header)
+		t.Errorf("headers = %v, want form-action 'self' only and no HSTS over http", res.Header)
 	}
 	if got := status(t, "http://"+addr+"/auth/login"); got != http.StatusServiceUnavailable {
 		t.Errorf("/auth/login with provider down = %d, want 503", got)
@@ -431,6 +434,24 @@ func TestRunWithMedia(t *testing.T) {
 		t.Errorf("grant expires in %v, want 10m", left)
 	}
 
+	const event = `{"event":"room_started","room":{"name":"office"}}`
+	for token, want := range map[string]int{"forged": http.StatusUnauthorized, webhookToken(event): http.StatusOK} {
+		req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/livekit/webhook", strings.NewReader(event))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", token)
+		req.Header.Set("Content-Type", "application/webhook+json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != want {
+			t.Errorf("webhook with token %.10s = %d, want %d", token, res.StatusCode, want)
+		}
+	}
+
 	cancel()
 	if err := <-errc; err != nil {
 		t.Errorf("run: %v", err)
@@ -500,4 +521,56 @@ func TestLoadConfigLiveKit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunWarnsOnUnrotatedPreviousKey(t *testing.T) {
+	for _, previous := range []string{"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA="} {
+		vars := oidcEnv()
+		vars["VB_OFFICE32_SESSION_KEY_PREVIOUS"] = previous
+		vars["VB_OFFICE32_ADDR"] = "127.0.0.1:0"
+		vars["VB_OFFICE32_MAPS_DIR"] = "../../maps"
+		vars["VB_OFFICE32_WEB_DIR"] = t.TempDir()
+		ctx, cancel := context.WithCancel(context.Background())
+		pr, pw := io.Pipe()
+		errc := make(chan error, 1)
+		go func() {
+			errc <- run(ctx, env(vars), pw)
+			pw.Close()
+		}()
+		var warned bool
+		sc := bufio.NewScanner(pr)
+		for sc.Scan() {
+			var line struct{ Level, Msg string }
+			if json.Unmarshal(sc.Bytes(), &line) != nil {
+				continue
+			}
+			if line.Level == "WARN" && strings.Contains(line.Msg, "SESSION_KEY_PREVIOUS") {
+				warned = true
+			}
+			if line.Msg == "listening" {
+				cancel()
+			}
+		}
+		cancel()
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+		if same := previous == vars["VB_OFFICE32_SESSION_KEY"]; warned != same {
+			t.Errorf("previous key equal to the current: %v, warned: %v", same, warned)
+		}
+	}
+}
+
+// webhookToken signs body for devkey and secret as LiveKit does.
+func webhookToken(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	now := time.Now().Unix()
+	claims, _ := json.Marshal(map[string]any{
+		"iss": "devkey", "nbf": now, "iat": now, "exp": now + 300,
+		"sha256": base64.StdEncoding.EncodeToString(sum[:]),
+	})
+	signed := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + base64.RawURLEncoding.EncodeToString(claims)
+	mac := hmac.New(sha256.New, []byte("secret"))
+	mac.Write([]byte(signed))
+	return signed + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

@@ -3,8 +3,11 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -24,22 +27,62 @@ import (
 type fakeIssuer struct {
 	ttl time.Duration
 	n   atomic.Int64
+	// list answers Participants; nil is an empty room.
+	list func(ctx context.Context) ([]string, error)
+	// delay is how long Remove takes.
+	delay time.Duration
 
 	mu      sync.Mutex
 	removed []string
+	lists   int
 }
 
-func (f *fakeIssuer) Remove(_ context.Context, room, identity string) error {
+func (f *fakeIssuer) Remove(ctx context.Context, room, identity string) (bool, error) {
+	select {
+	case <-time.After(f.delay):
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removed = append(f.removed, room+"/"+identity)
-	return nil
+	return true, nil
 }
 
+func (f *fakeIssuer) Participants(ctx context.Context, _ string) ([]string, error) {
+	f.mu.Lock()
+	f.lists++
+	f.mu.Unlock()
+	if f.list == nil {
+		return nil, nil
+	}
+	return f.list(ctx)
+}
+
+// removals returns the removals so far, sorted since they run concurrently.
 func (f *fakeIssuer) removals() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.Clone(f.removed)
+	return slices.Sorted(slices.Values(f.removed))
+}
+
+func (f *fakeIssuer) listCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lists
+}
+
+// gated returns a list function that waits for gate and then answers ids and
+// err.
+func gated(gate <-chan struct{}, ids []string, err error) func(context.Context) ([]string, error) {
+	return func(ctx context.Context) ([]string, error) {
+		select {
+		case <-gate:
+			return ids, err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
 func (f *fakeIssuer) Issue(identity, name, room string, now time.Time) (media.Grant, error) {
@@ -345,6 +388,178 @@ func TestMediaNotRemovedOnShutdown(t *testing.T) {
 		synctest.Wait()
 		if got := mi.removals(); len(got) != 0 {
 			t.Errorf("removed %v after shutdown", got)
+		}
+	})
+}
+
+func TestReconcileRemovesStale(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		mi.list = func(context.Context) ([]string, error) {
+			return []string{"guest:ana", "guest:bob", "guest:mallory", "intruder"}, nil
+		}
+		room, _ := runRoom(t, mi)
+		joinAs(t, room, "Ana")
+		bob := joinAs(t, room, "Bob")
+
+		time.Sleep(mediaCheck - removeGrace/2)
+		room.leave(bob)
+		time.Sleep(removeGrace/2 - time.Nanosecond)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Fatalf("removed %v before the first check", got)
+		}
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if got, want := mi.removals(), []string{"office/guest:mallory", "office/intruder"}; !slices.Equal(got, want) {
+			t.Fatalf("removed %v at the first check, want %v: not the member nor the one in its grace period", got, want)
+		}
+
+		time.Sleep(removeGrace / 2)
+		synctest.Wait()
+		if got, want := mi.removals(), []string{"office/guest:bob", "office/guest:mallory", "office/intruder"}; !slices.Equal(got, want) {
+			t.Errorf("removed %v after bob's grace period, want %v", got, want)
+		}
+	})
+}
+
+func TestReconcileOneAtATime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		mi := &fakeIssuer{ttl: time.Hour, list: gated(gate, nil, errors.New("connection refused"))}
+		runRoom(t, mi)
+
+		time.Sleep(3*mediaCheck + mediaCheck/2)
+		synctest.Wait()
+		if n := mi.listCount(); n != 1 {
+			t.Fatalf("lists = %d while the first is in flight, want 1", n)
+		}
+
+		close(gate)
+		synctest.Wait()
+		time.Sleep(mediaCheck / 2)
+		synctest.Wait()
+		if n := mi.listCount(); n != 2 {
+			t.Errorf("lists = %d after the first failed, want a new one at the next check", n)
+		}
+	})
+}
+
+func TestReconcileDecidesOnCurrentMembers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := make(chan struct{})
+		mi := &fakeIssuer{ttl: time.Hour, list: gated(gate, []string{"guest:ana"}, nil)}
+		room, _ := runRoom(t, mi)
+
+		time.Sleep(mediaCheck + time.Second)
+		joinAs(t, room, "Ana")
+		close(gate)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Errorf("removed %v, who joined while the list was in flight", got)
+		}
+	})
+}
+
+// TestMediaReissuedAfterRemovalRace rejoins while the removal is in flight:
+// the removal may land on the new media connection, so a grant follows it.
+func TestMediaReissuedAfterRemovalRace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour, delay: 2 * time.Second}
+		room, _ := runRoom(t, mi)
+		room.leave(joinAs(t, room, "Ana"))
+		time.Sleep(removeGrace + time.Second)
+
+		ana := joinAs(t, room, "Ana")
+		synctest.Wait()
+		if got := drain(t, ana); !slices.Equal(got, []string{typeWelcome, typeMedia, typeNearby}) {
+			t.Fatalf("messages on rejoin = %v", got)
+		}
+		if got := mi.removals(); len(got) != 0 {
+			t.Fatalf("removed %v before the call returned", got)
+		}
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if got := mi.removals(); !slices.Equal(got, []string{"office/guest:ana"}) {
+			t.Fatalf("removed %v, want office/guest:ana", got)
+		}
+		if got := drain(t, ana); !slices.Equal(got, []string{typeMedia}) {
+			t.Errorf("messages after the removal = %v, want a new media grant", got)
+		}
+	})
+}
+
+func drain(t *testing.T, s *Session) []string {
+	t.Helper()
+	var types []string
+	for len(s.out) > 0 {
+		types = append(types, received(t, s).T)
+	}
+	return types
+}
+
+type fakeEvents []media.Event
+
+func (f *fakeEvents) ReadEvent(r *http.Request, _ time.Time) (media.Event, error) {
+	switch r.Header.Get("Authorization") {
+	case "forged":
+		return media.Event{}, fmt.Errorf("%w: bad signature", media.ErrUnauthorized)
+	case "malformed":
+		return media.Event{}, errors.New("webhook: content type")
+	}
+	ev := (*f)[0]
+	*f = (*f)[1:]
+	return ev, nil
+}
+
+func TestWebhookRemovesParticipantWithoutSession(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		room, _ := runRoom(t, mi)
+		joinAs(t, room, "Ana")
+		room.leave(joinAs(t, room, "Bob"))
+		events := fakeEvents{
+			{Event: "participant_joined", Room: "office", Identity: "guest:ana"},
+			{Event: "participant_joined", Room: "office", Identity: "guest:bob"},
+			{Event: "participant_joined", Room: "office", Identity: "guest:mallory"},
+			{Event: "participant_joined", Room: "elsewhere", Identity: "guest:eve"},
+			{Event: "track_published", Room: "office", Identity: "guest:eve"},
+			{Event: "room_started", Room: "office"},
+		}
+		h := NewWebhookHandler(NewHub(room), &events, slog.New(slog.DiscardHandler))
+		for range len(events) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/livekit/webhook", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+		}
+		synctest.Wait()
+		if got := mi.removals(); !slices.Equal(got, []string{"office/guest:mallory"}) {
+			t.Errorf("removed %v, want only the active participant without a session", got)
+		}
+	})
+}
+
+func TestWebhookRejected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		room, _ := runRoom(t, mi)
+		h := NewWebhookHandler(NewHub(room), &fakeEvents{}, slog.New(slog.DiscardHandler))
+		for auth, want := range map[string]int{"forged": http.StatusUnauthorized, "malformed": http.StatusBadRequest} {
+			r := httptest.NewRequest(http.MethodPost, "/livekit/webhook", nil)
+			r.Header.Set("Authorization", auth)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			if rec.Code != want {
+				t.Errorf("%s: status = %d, want %d", auth, rec.Code, want)
+			}
+		}
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Errorf("removed %v on a rejected webhook", got)
 		}
 	})
 }
