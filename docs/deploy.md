@@ -72,6 +72,8 @@ Notes:
   unreachable `/auth/login` answers 503, and so do logins that arrive while
   the first discovery is still running. Outbound requests time out after
   10 s.
+- `cmd/devidp` is a development provider that signs in anyone; the image
+  builds only `./cmd/vb-office-32`, so never deploy or expose it.
 - The pod needs egress to the issuer (for Google, `accounts.google.com`,
   `oauth2.googleapis.com` and `www.googleapis.com`).
 - With the Google issuer the ID token must carry `hd` (Workspace accounts

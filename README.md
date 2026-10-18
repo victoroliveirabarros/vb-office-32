@@ -6,13 +6,16 @@ real time. The Go server is authoritative; the browser client lives in `web/`.
 ## Run
 
 ```sh
-cp .env.example .env   # make loads it; it sets AUTH=guest for development
-make run               # server on :8080
-make web-dev           # Vite dev server on :5173, proxies /ws, /maps, /auth and /api
+cp .env.example .env   # make loads it; it logs in through the development IdP
+sed -i "s|^VB_OFFICE32_SESSION_KEY=.*|VB_OFFICE32_SESSION_KEY=$(openssl rand -base64 32)|" .env
+make dev-oidc          # devidp on :9000, server on :8080, Vite on :5173
 ```
 
-Open http://localhost:5173 and pick a name. Without `.env` the server
-starts in `oidc` mode and refuses to boot until the OIDC variables are set.
+Open http://localhost:5173 and click "Entrar". For guest mode instead,
+uncomment `VB_OFFICE32_AUTH=guest` in `.env` and run `make run` and
+`make web-dev` (Vite proxies `/ws`, `/maps`, `/auth` and `/api` to :8080).
+Without `.env` the server starts in `oidc` mode and refuses to boot until
+the OIDC variables are set.
 
 `make` reads `.env` itself, so keep it to plain `KEY=value` lines: no quotes
 and no `$`.
@@ -51,6 +54,29 @@ The session is a signed `HttpOnly` cookie valid for 12 hours that keeps the
 subject, the display name and the email domain, not the address; open
 WebSockets close with 4002 when it expires. Removing a domain from the list
 revokes its sessions on their next request.
+
+## Local login with the development IdP
+
+`cmd/devidp` is a stdlib-only OpenID provider for testing the whole login
+in the browser without Google. It listens only on loopback
+(`127.0.0.1:9000`), generates its signing key at boot and signs in whoever
+fills its form, so it is never part of the image.
+
+```sh
+make devidp      # terminal 1
+make run         # terminal 2, with the OIDC block of .env.example
+make web-dev     # terminal 3
+# or all three at once: make dev-oidc
+```
+
+"Entrar" leads to the devidp page, which offers preset users (Ana and Bruno
+are accepted with `ALLOWED_DOMAINS=example.com`; `eve@outsider.test` and an
+unverified email are refused), a form for any name, email,
+`email_verified` and `hd`, and a button that answers `access_denied`.
+Its defaults match `.env.example`: issuer `http://localhost:9000`, client
+`dev-client`/`dev-secret` and redirect `http://localhost:5173/auth/callback`.
+Change them with flags (`go run ./cmd/devidp -h`), `DEVIDP_FLAGS` or the
+`DEVIDP_*` variables, keeping the server's variables in step.
 
 ## Endpoints
 
