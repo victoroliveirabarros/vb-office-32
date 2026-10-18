@@ -1,7 +1,7 @@
-import { CLOSE_REPLACED, encode, parseServerMessage } from './protocol'
+import { CLOSE_EXPIRED, CLOSE_REPLACED, encode, parseServerMessage } from './protocol'
 import type { ClientMessage, ServerMessage } from './protocol'
 
-export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced'
+export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'replaced' | 'expired'
 
 type Listener<T> = (value: T) => void
 
@@ -13,16 +13,27 @@ export function backoffDelay(attempt: number, random: () => number = Math.random
   return ceiling / 2 + random() * (ceiling / 2)
 }
 
-export type CloseAction = 'replaced' | 'reconnect'
+export type CloseAction = 'replaced' | 'expired' | 'reconnect'
 
 export function closeAction(code: number): CloseAction {
-  return code === CLOSE_REPLACED ? 'replaced' : 'reconnect'
+  switch (code) {
+    case CLOSE_REPLACED:
+      return 'replaced'
+    case CLOSE_EXPIRED:
+      return 'expired'
+    default:
+      return 'reconnect'
+  }
 }
 
-export function wsUrl(name: string, loc: Pick<Location, 'protocol' | 'host'> = location): string {
+export function wsUrl(name?: string, loc: Pick<Location, 'protocol' | 'host'> = location): string {
   const scheme = loc.protocol === 'https:' ? 'wss' : 'ws'
-  return `${scheme}://${loc.host}/ws?name=${encodeURIComponent(name)}`
+  const query = name === undefined ? '' : `?name=${encodeURIComponent(name)}`
+  return `${scheme}://${loc.host}/ws${query}`
 }
+
+// CheckAuth resolves false only when the session is definitely gone.
+export type CheckAuth = () => Promise<boolean>
 
 export class Connection {
   private socket: WebSocket | null = null
@@ -31,7 +42,12 @@ export class Connection {
   private readonly messageListeners = new Set<Listener<ServerMessage>>()
   private readonly statusListeners = new Set<Listener<ConnectionStatus>>()
 
-  constructor(private readonly url: string) {}
+  // A refused upgrade (401) reaches the browser as a bare 1006, so a socket
+  // that closes without opening asks checkAuth before retrying.
+  constructor(
+    private readonly url: string,
+    private readonly checkAuth?: CheckAuth,
+  ) {}
 
   onMessage(fn: Listener<ServerMessage>): () => void {
     this.messageListeners.add(fn)
@@ -53,8 +69,10 @@ export class Connection {
 
     const socket = new WebSocket(this.url)
     this.socket = socket
+    let opened = false
 
     socket.onopen = () => {
+      opened = true
       this.attempt = 0
       this.emitStatus('open')
     }
@@ -66,8 +84,16 @@ export class Connection {
     socket.onclose = (event) => {
       if (this.socket !== socket) return
       this.socket = null
-      if (closeAction(event.code) === 'replaced') {
-        this.emitStatus('replaced')
+      const action = closeAction(event.code)
+      if (action !== 'reconnect') {
+        this.emitStatus(action)
+        return
+      }
+      if (!opened && this.checkAuth) {
+        void this.checkAuth().then(
+          (alive) => (alive ? this.scheduleReconnect() : this.emitStatus('expired')),
+          () => this.scheduleReconnect(),
+        )
         return
       }
       this.scheduleReconnect()
@@ -84,7 +110,7 @@ export class Connection {
     this.emitStatus('reconnecting')
     const delay = backoffDelay(this.attempt)
     this.attempt++
-    this.retryTimer = window.setTimeout(() => this.connect(), delay)
+    this.retryTimer = setTimeout(() => this.connect(), delay)
   }
 
   private emitStatus(status: ConnectionStatus): void {

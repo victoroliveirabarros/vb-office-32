@@ -29,6 +29,7 @@ export type ServerMessage =
   | { t: 'pong'; d: { ts: number } }
 
 export const CLOSE_REPLACED = 4001
+export const CLOSE_EXPIRED = 4002
 export const MAX_PENDING_INPUTS = 8
 
 const NAME_PATTERN = /^[A-Za-z0-9 _-]{1,24}$/
