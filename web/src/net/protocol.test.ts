@@ -21,6 +21,28 @@ describe('parseServerMessage', () => {
     expect(parseServerMessage(raw)).toEqual(JSON.parse(raw))
   })
 
+  it('parses a media grant', () => {
+    const raw = JSON.stringify({ t: 'media', d: { url: 'wss://media.example', token: 'a.b.c', expiresAt: 1767269400000 } })
+    expect(parseServerMessage(raw)).toEqual(JSON.parse(raw))
+  })
+
+  it('parses nearby, including the empty set', () => {
+    for (const ids of [[], ['guest:ana', 'oidc:42']]) {
+      const raw = JSON.stringify({ t: 'nearby', d: { ids } })
+      expect(parseServerMessage(raw)).toEqual({ t: 'nearby', d: { ids } })
+    }
+  })
+
+  it('rejects malformed media and nearby', () => {
+    expect(parseServerMessage('{"t":"media","d":{"url":"wss://m","token":"t"}}')).toBeNull()
+    expect(parseServerMessage('{"t":"media","d":{"url":"wss://m","token":"t","expiresAt":"1"}}')).toBeNull()
+    expect(parseServerMessage('{"t":"media","d":{"url":"wss://m","token":"","expiresAt":1}}')).toBeNull()
+    expect(parseServerMessage('{"t":"media","d":{"url":1,"token":"t","expiresAt":1}}')).toBeNull()
+    expect(parseServerMessage('{"t":"nearby","d":{}}')).toBeNull()
+    expect(parseServerMessage('{"t":"nearby","d":{"ids":null}}')).toBeNull()
+    expect(parseServerMessage('{"t":"nearby","d":{"ids":["a",2]}}')).toBeNull()
+  })
+
   it('rejects malformed messages', () => {
     expect(parseServerMessage('not json')).toBeNull()
     expect(parseServerMessage('{"t":"nope","d":{}}')).toBeNull()

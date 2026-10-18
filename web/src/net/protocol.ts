@@ -21,12 +21,20 @@ export type Welcome = {
 
 export type State = { tick: number; ack: number; players: Pos[] }
 
+/** LiveKit connection; expiresAt is unix milliseconds. */
+export type Media = { url: string; token: string; expiresAt: number }
+
+/** Full set of players in earshot of the recipient, sorted, without itself. */
+export type Nearby = { ids: string[] }
+
 export type ServerMessage =
   | { t: 'welcome'; d: Welcome }
   | { t: 'joined'; d: Player }
   | { t: 'left'; d: { id: string } }
   | { t: 'state'; d: State }
   | { t: 'pong'; d: { ts: number } }
+  | { t: 'media'; d: Media }
+  | { t: 'nearby'; d: Nearby }
 
 export const CLOSE_REPLACED = 4001
 export const CLOSE_EXPIRED = 4002
@@ -64,6 +72,10 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return isState(d) ? { t: 'state', d } : null
     case 'pong':
       return isNumber(d.ts) ? { t: 'pong', d: { ts: d.ts } } : null
+    case 'media':
+      return isMedia(d) ? { t: 'media', d: { url: d.url, token: d.token, expiresAt: d.expiresAt } } : null
+    case 'nearby':
+      return isNearby(d) ? { t: 'nearby', d: { ids: d.ids } } : null
     default:
       return null
   }
@@ -94,4 +106,12 @@ function isWelcome(d: Record<string, unknown>): d is Welcome {
 
 function isState(d: Record<string, unknown>): d is State {
   return isInt(d.tick) && isInt(d.ack) && Array.isArray(d.players) && d.players.every(isPos)
+}
+
+function isMedia(d: Record<string, unknown>): d is Media {
+  return isString(d.url) && d.url !== '' && isString(d.token) && d.token !== '' && isInt(d.expiresAt)
+}
+
+function isNearby(d: Record<string, unknown>): d is Nearby {
+  return Array.isArray(d.ids) && d.ids.every(isString)
 }
