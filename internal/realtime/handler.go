@@ -21,21 +21,30 @@ type Handler struct {
 	hub            *Hub
 	auth           Authenticator
 	originPatterns []string
+	slots          chan struct{}
 	log            *slog.Logger
 }
 
-func NewHandler(hub *Hub, authn Authenticator, originPatterns []string, log *slog.Logger) *Handler {
-	return &Handler{hub: hub, auth: authn, originPatterns: originPatterns, log: log}
+// NewHandler accepts at most maxSessions concurrent connections; the limit
+// counts connections, not identities.
+func NewHandler(hub *Hub, authn Authenticator, originPatterns []string, maxSessions int, log *slog.Logger) *Handler {
+	return &Handler{
+		hub:            hub,
+		auth:           authn,
+		originPatterns: originPatterns,
+		slots:          make(chan struct{}, maxSessions),
+		log:            log,
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id, err := h.auth.Authenticate(r)
 	if err != nil {
-		status := http.StatusUnauthorized
 		if errors.Is(err, auth.ErrInvalidName) {
-			status = http.StatusBadRequest
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 	room, ok := h.hub.Room(DefaultSpace)
@@ -43,6 +52,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "space not found", http.StatusNotFound)
 		return
 	}
+	select {
+	case h.slots <- struct{}{}:
+	default:
+		h.log.Warn("server full", "max", cap(h.slots))
+		http.Error(w, "server full", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() { <-h.slots }()
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: h.originPatterns})
 	if err != nil {
@@ -53,9 +70,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// library limit would close with 1009.
 	conn.SetReadLimit(-1)
 
-	s := newSession(id.ID, id.Name, conn, room, h.log.With("session", id.ID))
+	s := newSession(id, conn, room, h.log.With("session", id.ID))
 	if err := room.join(r.Context(), s); err != nil {
-		conn.Close(websocket.StatusGoingAway, "server shutting down")
+		conn.Close(websocket.StatusGoingAway, reasonRestarting)
 		return
 	}
 	s.run(r.Context())

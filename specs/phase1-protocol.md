@@ -13,9 +13,17 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 
 ## Transporte
 
-- WebSocket em `GET /ws?name=<nome>` (auth stub da fase 1).
-- `name`: 1–24 chars, `[A-Za-z0-9 _-]`, trim de espaços. Inválido → HTTP 400 antes do upgrade.
-- Identidade = `"guest:" + lowercase(name)`. Mesma identidade conectando de novo derruba a sessão anterior (close code 4001, reason `"replaced"`).
+- WebSocket em `GET /ws`. A identidade depende do modo (`VB_OFFICE32_AUTH`):
+  - `oidc` (padrão): identidade vem do cookie de sessão; `?name` é ignorado. Sem cookie válido (ausente, adulterado, expirado ou domínio fora da lista) → HTTP 401 antes do upgrade. Identidade = `"oidc:" + sub`; nome = claim `name` do provedor (fallback: parte local do email), sem caracteres de controle/formatação, trim, até 32 runes; acentos são válidos.
+  - `guest` (desenvolvimento): `GET /ws?name=<nome>`. `name`: 1–24 chars, `[A-Za-z0-9 _-]`, trim de espaços. Inválido → HTTP 400 antes do upgrade. Identidade = `"guest:" + lowercase(name)`.
+- Outra falha de autenticação → HTTP 401 com corpo genérico (`Unauthorized`), nunca o erro interno.
+- Mesma identidade conectando de novo derruba a sessão anterior (close code 4001, reason `"replaced"`).
+- Em modo `oidc`, a conexão fecha com 4002 reason `"session expired"` quando a sessão (12 h) expira.
+- `GET /api/session` diz ao frontend qual tela mostrar: `oidc` → 200 `{id, name, auth: "oidc"}` ou 401 `{auth: "oidc"}`; `guest` → sempre 401 `{auth: "guest"}`. O email nunca é exposto.
+- Recusas antes do upgrade (HTTP, sem WebSocket; no browser aparecem como close 1006):
+  - Sem sessão válida (modo `oidc`) → 401.
+  - Servidor encerrando (readiness falsa) → 503 `shutting down`.
+  - Limite global de conexões (`VB_OFFICE32_MAX_SESSIONS`, default 200) atingido → 503 `server full`. Conta conexões, não identidades.
 - Todas mensagens são texto JSON com envelope:
 
 ```json
@@ -23,7 +31,19 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 ```
 
 - Mensagem do cliente > 4 KiB ou inválida → close 1008.
+- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`.
 - Cliente lento (buffer de envio cheio, 64 mensagens) → close 1008 reason `"slow consumer"`.
+- Shutdown do servidor → close 1001 reason `"server restarting"`. O cliente reconecta com backoff.
+
+### Close codes e ação do cliente
+
+| code | reason | ação do cliente |
+|---|---|---|
+| 4001 | `"replaced"` | para; mostra "sessão aberta em outra aba" |
+| 4002 | `"session expired"` | para; recarrega a página (volta à tela "Entrar") |
+| 1001 | `"server restarting"` | reconecta com backoff |
+| 1008 | `"rate limit"`, `"slow consumer"`, mensagem inválida | reconecta com backoff |
+| 1006 | (sem close frame; inclui recusa HTTP antes do upgrade) | se a conexão nunca abriu e o modo é `oidc`, consulta `/api/session`: 401 → trata como 4002; senão reconecta com backoff |
 
 ## Tipos compartilhados
 
@@ -91,5 +111,5 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 
 ## Spawn e reconexão
 
-- Identidade com última posição conhecida (memória do processo) → volta para ela.
+- Identidade com última posição conhecida (memória do processo) → volta para ela. A memória guarda no máximo 1000 identidades ausentes; acima disso esquece a que saiu há mais tempo. Ao reentrar, a entrada é consumida.
 - Senão → spawn point em ordem, ciclando.

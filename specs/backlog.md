@@ -1,14 +1,25 @@
 # Backlog
 
-## Fase 2
+## Fase 2b — login OIDC (feito)
 
-- Rate limit de mensagens por sessão (`move`/`ping`), fechando com 1008 ao exceder.
-- Limite de conexões simultâneas (global e por IP).
-- Limite de `Space.last` (última posição por identidade): hoje cresce sem limite durante a vida do processo; definir TTL ou tamanho máximo com expulsão.
-- `VB_OFFICE32_ALLOWED_ORIGINS`: default vazio (só mesma origem). Hoje `env()` trata vazio como ausente e o default `localhost:5173,127.0.0.1:5173` vale em produção. Origens do Vite passam a ser definidas pelo `make web-dev`/`make run`.
-- `.env.example` versionado com todas as `VB_OFFICE32_*` (valores de dev, segredos vazios); `.env` no `.gitignore`; `Makefile` carrega `.env` se existir.
-- Novas envs: `VB_OFFICE32_PUBLIC_URL`, `VB_OFFICE32_GOOGLE_CLIENT_ID`, `VB_OFFICE32_GOOGLE_CLIENT_SECRET` (segredo), `VB_OFFICE32_ALLOWED_DOMAINS`, `VB_OFFICE32_SESSION_KEY` (segredo). Config falha no boot se SSO habilitado e faltar alguma; segredos nunca logados.
+Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisões de segurança"). Envs `VB_OFFICE32_AUTH`, `VB_OFFICE32_PUBLIC_URL`, `VB_OFFICE32_OIDC_ISSUER`, `VB_OFFICE32_OIDC_CLIENT_ID`, `VB_OFFICE32_OIDC_CLIENT_SECRET`, `VB_OFFICE32_ALLOWED_DOMAINS`, `VB_OFFICE32_SESSION_KEY` documentadas no README e em `docs/deploy.md`; contrato (`oidc:<sub>`, 4002, nome por modo) em `phase1-protocol.md`.
+
+## Depois da fase 2
+
+- `VB_OFFICE32_SESSION_KEY_PREVIOUS`: aceitar a chave anterior na validação para rotacionar sem derrubar sessões.
+- Revogação de sessão no servidor (hoje o cookie vale até expirar, salvo domínio removido da config).
+- `prompt=select_account` no login, para trocar de conta Google sem sair do provedor.
+- CSP e demais headers de segurança nas páginas.
+- Logout RP-initiated (`end_session_endpoint`) quando o provedor suportar.
+- Job no CI com `docker buildx build --platform linux/amd64,linux/arm64`.
+- `client_secret_post` para provedores que não aceitem `client_secret_basic` (hoje fixo em Basic).
+- M6 — DNS rebinding no proxy WS do Vite em dev: requisição com `Host`/`Origin` = `evil.com:5173` recebe 101 no `/ws` (o proxy preserva o Host e o check de Origin compara Origin com Host). Em `AUTH=oidc` o upgrade dá 401; em `guest` qualquer um já entra. Só dev; corrigir com `server.allowedHosts` no Vite ou checagem de Host no proxy.
 
 ## Fase 3
 
 - Envs LiveKit: `VB_OFFICE32_LIVEKIT_URL`, `VB_OFFICE32_LIVEKIT_API_KEY` (segredo), `VB_OFFICE32_LIVEKIT_API_SECRET` (segredo).
+- Métricas Prometheus (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack, logins negados por motivo).
+
+## Descartado
+
+- Limite de conexões por IP. Atrás de proxy/load balancer o servidor só vê o IP do proxy; o IP real chega por `X-Forwarded-For`, que o cliente consegue forjar a menos que a cadeia de proxies confiáveis seja configurada. Um limite assim seria contornável ou bloquearia todos atrás do mesmo proxy. O limite global (`VB_OFFICE32_MAX_SESSIONS`), o rate limit por conexão e a autenticação cobrem o risco.

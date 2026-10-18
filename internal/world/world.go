@@ -17,6 +17,9 @@ const (
 	StepCooldown     = 150 * time.Millisecond
 	MaxPendingInputs = 8
 
+	// maxLast bounds how many departed players keep their last position.
+	maxLast = 1000
+
 	// stepSlack absorbs ticker jitter: a step is due this much early, and a
 	// step taken up to this much late keeps the cadence of the previous one.
 	stepSlack = TickInterval / 2
@@ -90,14 +93,17 @@ type player struct {
 }
 
 type lastSeen struct {
-	pos tilemap.Point
-	dir Dir
+	pos   tilemap.Point
+	dir   Dir
+	order uint64
 }
 
 type Space struct {
 	m         *tilemap.Map
 	players   map[string]*player
 	last      map[string]lastSeen
+	lastCap   int
+	lastOrder uint64
 	nextSpawn int
 	tick      uint64
 }
@@ -107,6 +113,7 @@ func NewSpace(m *tilemap.Map) *Space {
 		m:       m,
 		players: make(map[string]*player),
 		last:    make(map[string]lastSeen),
+		lastCap: maxLast,
 	}
 }
 
@@ -123,6 +130,7 @@ func (s *Space) Join(id, name string) Player {
 	p := &player{Player: Player{ID: id, Name: name, Dir: Down}}
 	if l, ok := s.last[id]; ok {
 		p.Pos, p.Dir = l.pos, l.dir
+		delete(s.last, id)
 	} else {
 		p.Pos = s.m.Spawns[s.nextSpawn%len(s.m.Spawns)]
 		s.nextSpawn++
@@ -136,8 +144,23 @@ func (s *Space) Leave(id string) {
 	if !ok {
 		return
 	}
-	s.last[id] = lastSeen{pos: p.Pos, dir: p.Dir}
+	s.lastOrder++
+	s.last[id] = lastSeen{pos: p.Pos, dir: p.Dir, order: s.lastOrder}
 	delete(s.players, id)
+	if len(s.last) > s.lastCap {
+		s.evictOldest()
+	}
+}
+
+func (s *Space) evictOldest() {
+	var oldest string
+	var order uint64
+	for id, l := range s.last {
+		if oldest == "" || l.order < order {
+			oldest, order = id, l.order
+		}
+	}
+	delete(s.last, oldest)
 }
 
 func (s *Space) Enqueue(id string, in Input) error {

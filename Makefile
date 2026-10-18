@@ -1,3 +1,7 @@
+# .env is parsed by make: plain KEY=value lines, no quotes and no '$'.
+-include .env
+export
+
 GO      ?= go
 BIN     := bin
 LOADBOT_FLAGS ?= -n 50 -duration 20s

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var ErrInvalidName = errors.New("name must be 1-24 characters of letters, digits, space, '_' or '-'")
@@ -12,9 +13,11 @@ var ErrInvalidName = errors.New("name must be 1-24 characters of letters, digits
 type Identity struct {
 	ID   string
 	Name string
+	// Expires is when the session ends; zero means never.
+	Expires time.Time
 }
 
-// Guest trusts the "name" query parameter. It is the phase 1 stand-in for SSO.
+// Guest trusts the "name" query parameter. It is meant for development.
 type Guest struct{}
 
 func (Guest) Authenticate(r *http.Request) (Identity, error) {
