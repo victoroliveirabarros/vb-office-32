@@ -13,6 +13,12 @@ export function backoffDelay(attempt: number, random: () => number = Math.random
   return ceiling / 2 + random() * (ceiling / 2)
 }
 
+export type CloseAction = 'replaced' | 'reconnect'
+
+export function closeAction(code: number): CloseAction {
+  return code === CLOSE_REPLACED ? 'replaced' : 'reconnect'
+}
+
 export function wsUrl(name: string, loc: Pick<Location, 'protocol' | 'host'> = location): string {
   const scheme = loc.protocol === 'https:' ? 'wss' : 'ws'
   return `${scheme}://${loc.host}/ws?name=${encodeURIComponent(name)}`
@@ -60,7 +66,7 @@ export class Connection {
     socket.onclose = (event) => {
       if (this.socket !== socket) return
       this.socket = null
-      if (event.code === CLOSE_REPLACED) {
+      if (closeAction(event.code) === 'replaced') {
         this.emitStatus('replaced')
         return
       }
