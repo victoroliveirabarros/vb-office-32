@@ -12,7 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -39,37 +39,6 @@ func main() {
 	}
 }
 
-type config struct {
-	addr           string
-	mapsDir        string
-	webDir         string
-	allowedOrigins []string
-	logLevel       slog.Level
-}
-
-func loadConfig(getenv func(string) string) (config, error) {
-	env := func(key, def string) string {
-		if v := getenv(key); v != "" {
-			return v
-		}
-		return def
-	}
-	cfg := config{
-		addr:    env("VB_OFFICE32_ADDR", ":8080"),
-		mapsDir: env("VB_OFFICE32_MAPS_DIR", "maps"),
-		webDir:  env("VB_OFFICE32_WEB_DIR", "web/dist"),
-	}
-	for o := range strings.SplitSeq(env("VB_OFFICE32_ALLOWED_ORIGINS", "localhost:5173,127.0.0.1:5173"), ",") {
-		if o = strings.TrimSpace(o); o != "" {
-			cfg.allowedOrigins = append(cfg.allowedOrigins, o)
-		}
-	}
-	if err := cfg.logLevel.UnmarshalText([]byte(env("VB_OFFICE32_LOG_LEVEL", "info"))); err != nil {
-		return config{}, fmt.Errorf("VB_OFFICE32_LOG_LEVEL: %w", err)
-	}
-	return cfg, nil
-}
-
 func run(ctx context.Context, getenv func(string) string, stdout io.Writer) error {
 	cfg, err := loadConfig(getenv)
 	if err != nil {
@@ -81,20 +50,34 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
+	var ready atomic.Bool
 	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), log))
-	ws := realtime.NewHandler(hub, auth.Guest{}, cfg.allowedOrigins, log)
-	srv := httpapi.NewServer(httpapi.NewHandler(ws, cfg.mapsDir, cfg.webDir))
+	ws := realtime.NewHandler(hub, auth.Guest{}, cfg.allowedOrigins, cfg.maxSessions, log)
+	srv := httpapi.NewServer(httpapi.NewHandler(httpapi.Options{
+		WS:      ws,
+		Ready:   ready.Load,
+		MapsDir: cfg.mapsDir,
+		WebDir:  cfg.webDir,
+	}))
 	srv.ErrorLog = slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 
 	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", cfg.addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Info("listening", "addr", ln.Addr().String())
+	log.Info("listening", "addr", ln.Addr().String(), "max_sessions", cfg.maxSessions)
 
+	// The hub outlives ctx so sessions are closed only after readiness has
+	// turned false, while the listener still answers /readyz with 503.
+	hubCtx, stopHub := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopHub()
+	hubDone := make(chan struct{})
+
+	ready.Store(true)
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return hub.Run(gctx)
+		defer close(hubDone)
+		return hub.Run(hubCtx)
 	})
 	g.Go(func() error {
 		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
@@ -104,8 +87,15 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	})
 	g.Go(func() error {
 		<-gctx.Done()
+		ready.Store(false)
+		log.Info("shutting down")
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(gctx), shutdownTimeout)
 		defer cancel()
+		stopHub()
+		select {
+		case <-hubDone:
+		case <-sctx.Done():
+		}
 		return srv.Shutdown(sctx)
 	})
 	if err := g.Wait(); err != nil {

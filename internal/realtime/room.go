@@ -81,7 +81,7 @@ func (r *Room) Run(ctx context.Context) error {
 // handshakes so clients see 1001 instead of a dropped connection.
 func (r *Room) shutdown() {
 	for _, m := range r.members {
-		m.sess.close(websocket.StatusGoingAway, "server shutting down")
+		m.sess.close(websocket.StatusGoingAway, reasonRestarting)
 	}
 	timeout := time.After(shutdownTimeout)
 	for _, m := range r.members {

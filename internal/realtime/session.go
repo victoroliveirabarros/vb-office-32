@@ -24,6 +24,8 @@ const (
 	reasonReplaced     = "replaced"
 	reasonSlowConsumer = "slow consumer"
 	reasonPingTimeout  = "ping timeout"
+	reasonRateLimit    = "rate limit"
+	reasonRestarting   = "server restarting"
 )
 
 type closeReason struct {
@@ -31,8 +33,8 @@ type closeReason struct {
 	reason string
 }
 
-// level separates anomalies from routine closes. Every 1008 close is either
-// a protocol error or a slow consumer.
+// level separates anomalies from routine closes. Every 1008 close is a
+// protocol error, a slow consumer or a rate limit.
 func (c closeReason) level() slog.Level {
 	switch {
 	case c.code == websocket.StatusPolicyViolation, c.reason == reasonPingTimeout:
@@ -52,6 +54,7 @@ type Session struct {
 	room *Room
 	log  *slog.Logger
 
+	limiter   tokenBucket
 	out       chan []byte
 	done      chan struct{}
 	ended     chan struct{}
@@ -61,14 +64,15 @@ type Session struct {
 
 func newSession(id, name string, conn *websocket.Conn, room *Room, log *slog.Logger) *Session {
 	return &Session{
-		id:    id,
-		name:  name,
-		conn:  conn,
-		room:  room,
-		log:   log,
-		out:   make(chan []byte, sendBuffer),
-		done:  make(chan struct{}),
-		ended: make(chan struct{}),
+		id:      id,
+		name:    name,
+		conn:    conn,
+		room:    room,
+		log:     log,
+		limiter: newTokenBucket(messageRate, messageBurst),
+		out:     make(chan []byte, sendBuffer),
+		done:    make(chan struct{}),
+		ended:   make(chan struct{}),
 	}
 }
 
@@ -111,6 +115,10 @@ func (s *Session) readLoop(ctx context.Context) error {
 		typ, r, err := s.conn.Reader(ctx)
 		if err != nil {
 			return err
+		}
+		if !s.limiter.allow(time.Now()) {
+			s.close(websocket.StatusPolicyViolation, reasonRateLimit)
+			return nil
 		}
 		if typ != websocket.MessageText {
 			s.close(websocket.StatusPolicyViolation, "text messages only")

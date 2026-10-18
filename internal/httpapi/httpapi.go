@@ -8,16 +8,47 @@ import (
 	"time"
 )
 
-func NewHandler(ws http.Handler, mapsDir, webDir string) http.Handler {
+type Options struct {
+	WS http.Handler
+	// Ready reports whether the server accepts new sessions. It turns false
+	// when shutdown starts, before sessions are closed.
+	Ready   func() bool
+	MapsDir string
+	WebDir  string
+}
+
+func NewHandler(opts Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("ok\n"))
+		writeText(w, http.StatusOK, "ok")
 	})
-	mux.Handle("GET /ws", ws)
-	mux.Handle("GET /maps/", http.StripPrefix("/maps/", tiledJSON(http.FileServer(filesOnly{http.Dir(mapsDir)}))))
-	mux.Handle("GET /", http.FileServer(filesOnly{http.Dir(webDir)}))
-	return mux
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if !opts.Ready() {
+			writeText(w, http.StatusServiceUnavailable, "shutting down")
+			return
+		}
+		writeText(w, http.StatusOK, "ok")
+	})
+	mux.Handle("GET /ws", whenReady(opts.Ready, opts.WS))
+	mux.Handle("GET /maps/", http.StripPrefix("/maps/", tiledJSON(http.FileServer(filesOnly{http.Dir(opts.MapsDir)}))))
+	mux.Handle("GET /", http.FileServer(filesOnly{http.Dir(opts.WebDir)}))
+	return http.NewCrossOriginProtection().Handler(mux)
+}
+
+func writeText(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body + "\n"))
+}
+
+func whenReady(ready func() bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !ready() {
+			http.Error(w, "shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // filesOnly hides directories so FileServer never lists them. The root is

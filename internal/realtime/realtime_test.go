@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,11 @@ import (
 // spawns at (0,0) and (0,1).
 func startServer(t *testing.T) string {
 	t.Helper()
+	return startServerWith(t, auth.Guest{}, 100)
+}
+
+func startServerWith(t *testing.T, authn Authenticator, maxSessions int) string {
+	t.Helper()
 	m, err := tilemap.LoadFile("testdata/small.tmj")
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +40,7 @@ func startServer(t *testing.T) string {
 	done := make(chan error, 1)
 	go func() { done <- hub.Run(ctx) }()
 
-	srv := httptest.NewServer(NewHandler(hub, auth.Guest{}, nil, log))
+	srv := httptest.NewServer(NewHandler(hub, authn, nil, maxSessions, log))
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -281,6 +287,103 @@ func TestInvalidNameRejectedBeforeUpgrade(t *testing.T) {
 	}
 }
 
+func TestRateLimit(t *testing.T) {
+	url := startServer(t)
+	c := dial(t, url, "dora")
+	expect[welcomeMsg](c, typeWelcome, nil)
+
+	ping := []byte(`{"t":"ping","d":{"ts":1}}`)
+	for range messageBurst + 10 {
+		if err := c.conn.Write(context.Background(), websocket.MessageText, ping); err != nil {
+			break
+		}
+	}
+	for {
+		_, err := c.read()
+		if err == nil {
+			continue
+		}
+		var ce websocket.CloseError
+		if !errors.As(err, &ce) || ce.Code != websocket.StatusPolicyViolation || ce.Reason != reasonRateLimit {
+			t.Fatalf("close = %v, want 1008 %q", err, reasonRateLimit)
+		}
+		return
+	}
+}
+
+func TestTokenBucket(t *testing.T) {
+	b := newTokenBucket(20, 40)
+	now := time.Unix(0, 0)
+	for i := range 40 {
+		if !b.allow(now) {
+			t.Fatalf("message %d rejected within burst", i+1)
+		}
+	}
+	if b.allow(now) {
+		t.Fatal("message 41 allowed, want burst of 40")
+	}
+	now = now.Add(50 * time.Millisecond)
+	if !b.allow(now) {
+		t.Error("rejected after refilling one token")
+	}
+	if b.allow(now) {
+		t.Error("allowed a second message on one refilled token")
+	}
+	now = now.Add(time.Hour)
+	for i := range 40 {
+		if !b.allow(now) {
+			t.Fatalf("message %d rejected after idle, want burst restored", i+1)
+		}
+	}
+	if b.allow(now) {
+		t.Error("idle refill exceeded burst")
+	}
+}
+
+func TestMaxSessions(t *testing.T) {
+	url := startServerWith(t, auth.Guest{}, 1)
+	ana := dial(t, url, "ana")
+	expect[welcomeMsg](ana, typeWelcome, nil)
+
+	_, resp, err := websocket.Dial(context.Background(), url+"?name=bob", nil)
+	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("second dial: resp = %v, err = %v, want 503", resp, err)
+	}
+
+	ana.conn.Close(websocket.StatusNormalClosure, "")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, _, err := websocket.Dial(context.Background(), url+"?name=bob", nil)
+		if err == nil {
+			conn.CloseNow()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slot not released after close: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type failingAuth struct{}
+
+func (failingAuth) Authenticate(*http.Request) (auth.Identity, error) {
+	return auth.Identity{}, errors.New("token for secret@example.com expired")
+}
+
+func TestAuthErrorIsNotLeaked(t *testing.T) {
+	url := startServerWith(t, failingAuth{}, 1)
+	res, err := http.Get("http" + strings.TrimPrefix(url, "ws"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusUnauthorized || strings.TrimSpace(string(body)) != "Unauthorized" {
+		t.Errorf("response = %d %q, want 401 Unauthorized", res.StatusCode, body)
+	}
+}
+
 func TestSlowConsumerIsClosed(t *testing.T) {
 	s := newSession("guest:x", "x", nil, nil, slog.New(slog.DiscardHandler))
 	for range sendBuffer {
@@ -312,7 +415,8 @@ func TestCloseReasonLevel(t *testing.T) {
 		{closeReason{websocket.StatusPolicyViolation, "invalid message"}, slog.LevelWarn},
 		{closeReason{websocket.StatusGoingAway, reasonPingTimeout}, slog.LevelWarn},
 		{closeReason{statusReplaced, reasonReplaced}, slog.LevelInfo},
-		{closeReason{websocket.StatusGoingAway, "server shutting down"}, slog.LevelDebug},
+		{closeReason{websocket.StatusPolicyViolation, reasonRateLimit}, slog.LevelWarn},
+		{closeReason{websocket.StatusGoingAway, reasonRestarting}, slog.LevelDebug},
 		{closeReason{websocket.StatusNormalClosure, ""}, slog.LevelDebug},
 	}
 	for _, tt := range tests {
