@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS go
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
