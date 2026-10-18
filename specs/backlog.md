@@ -1,11 +1,8 @@
 # Backlog
 
-## Fase 2b — login OIDC
+## Fase 2b — login OIDC (feito)
 
-Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisões de segurança").
-
-- Novas envs: `VB_OFFICE32_AUTH` (`oidc|guest`, default `oidc`), `VB_OFFICE32_PUBLIC_URL`, `VB_OFFICE32_OIDC_ISSUER`, `VB_OFFICE32_OIDC_CLIENT_ID`, `VB_OFFICE32_OIDC_CLIENT_SECRET` (segredo), `VB_OFFICE32_ALLOWED_DOMAINS`, `VB_OFFICE32_SESSION_KEY` (segredo). Config falha no boot se `AUTH=oidc` e faltar alguma; segredos nunca logados. Entram em `config.go`, `.env.example`, README e `docs/deploy.md`.
-- Contrato: identidade `oidc:<sub>`, close 4002 `"session expired"`, nome por modo.
+Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisões de segurança"). Envs `VB_OFFICE32_AUTH`, `VB_OFFICE32_PUBLIC_URL`, `VB_OFFICE32_OIDC_ISSUER`, `VB_OFFICE32_OIDC_CLIENT_ID`, `VB_OFFICE32_OIDC_CLIENT_SECRET`, `VB_OFFICE32_ALLOWED_DOMAINS`, `VB_OFFICE32_SESSION_KEY` documentadas no README e em `docs/deploy.md`; contrato (`oidc:<sub>`, 4002, nome por modo) em `phase1-protocol.md`.
 
 ## Depois da fase 2
 
@@ -15,11 +12,12 @@ Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisõ
 - CSP e demais headers de segurança nas páginas.
 - Logout RP-initiated (`end_session_endpoint`) quando o provedor suportar.
 - Job no CI com `docker buildx build --platform linux/amd64,linux/arm64`.
+- `client_secret_post` para provedores que não aceitem `client_secret_basic` (hoje fixo em Basic).
 
 ## Fase 3
 
 - Envs LiveKit: `VB_OFFICE32_LIVEKIT_URL`, `VB_OFFICE32_LIVEKIT_API_KEY` (segredo), `VB_OFFICE32_LIVEKIT_API_SECRET` (segredo).
-- Métricas Prometheus (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack).
+- Métricas Prometheus (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack, logins negados por motivo).
 
 ## Descartado
 
