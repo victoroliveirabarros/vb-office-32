@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
 	"github.com/victoroliveirabarros/vb-office-32/internal/media"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
@@ -22,6 +23,7 @@ const (
 	// removeGrace is how long an identity that left keeps its media
 	// connection, so a reconnecting WebSocket does not drop the call.
 	removeGrace = 30 * time.Second
+	chatBuffer  = 64
 )
 
 var errRoomClosed = errors.New("room closed")
@@ -66,6 +68,7 @@ type Room struct {
 	joins    chan *Session
 	leaves   chan *Session
 	inputs   chan sessionInput
+	chats    chan sessionChat
 	removals chan removal
 	listed   chan []string
 	arrived  chan string
@@ -78,6 +81,12 @@ type Room struct {
 	listing    bool
 	removing   sync.WaitGroup
 	checkEvery time.Duration
+
+	ids     *chat.IDs
+	history chat.History
+	// historyMsg caches the encoded chatHistory until the next everyone
+	// message.
+	historyMsg []byte
 }
 
 func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *Room {
@@ -90,6 +99,7 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 		joins:    make(chan *Session),
 		leaves:   make(chan *Session),
 		inputs:   make(chan sessionInput, 256),
+		chats:    make(chan sessionChat, chatBuffer),
 		removals: make(chan removal),
 		listed:   make(chan []string),
 		arrived:  make(chan string),
@@ -99,6 +109,7 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 		pending:  make(map[string]removal),
 
 		checkEvery: mediaCheck,
+		ids:        chat.NewIDs(),
 	}
 }
 
@@ -124,6 +135,8 @@ func (r *Room) Run(ctx context.Context) error {
 			r.handleLeave(s)
 		case in := <-r.inputs:
 			r.handleInput(in)
+		case c := <-r.chats:
+			r.handleChat(c)
 		case rm := <-r.removals:
 			r.handleRemoval(ctx, rm)
 		case ids := <-r.listed:
@@ -215,8 +228,9 @@ func (r *Room) handleJoin(s *Session) {
 	s.send(welcome)
 	if r.media != nil {
 		r.sendMedia(m, time.Now())
-		r.sendNearby(s, r.space.Nearby(s.id))
 	}
+	r.sendNearby(s, r.space.Nearby(s.id))
+	r.sendHistory(s)
 	r.log.Info("player joined", "id", s.id, "replaced", replaced)
 
 	if !replaced || old.sess.name != s.name {
@@ -354,11 +368,9 @@ func (r *Room) tick(now time.Time) {
 	if len(d.Moved) > 0 || len(d.Acks) > 0 {
 		r.sendState(d)
 	}
-	if r.media != nil {
-		for id, ids := range d.Nearby {
-			if m, ok := r.members[id]; ok {
-				r.sendNearby(m.sess, ids)
-			}
+	for id, ids := range d.Nearby {
+		if m, ok := r.members[id]; ok {
+			r.sendNearby(m.sess, ids)
 		}
 	}
 }

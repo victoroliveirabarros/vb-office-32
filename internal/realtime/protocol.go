@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
@@ -19,6 +20,19 @@ const (
 	typePong    = "pong"
 	typeMedia   = "media"
 	typeNearby  = "nearby"
+
+	typeChat        = "chat"
+	typeChatHistory = "chatHistory"
+	typeChatError   = "chatError"
+
+	maxCIDLen = 36
+	maxToLen  = 300
+
+	chatRateLimited = "rate_limited"
+	chatTooLong     = "too_long"
+	chatEmpty       = "empty"
+	chatOffline     = "offline"
+	chatInvalid     = "invalid"
 )
 
 var errInvalidMessage = errors.New("invalid message")
@@ -28,7 +42,7 @@ type envelope struct {
 	D json.RawMessage `json:"d"`
 }
 
-// clientMsg is a decoded client message: moveMsg or pingMsg.
+// clientMsg is a decoded client message: moveMsg, pingMsg or chatIn.
 type clientMsg interface {
 	clientMsg()
 }
@@ -42,8 +56,43 @@ type pingMsg struct {
 	TS float64 `json:"ts"`
 }
 
+// chatIn is a chat as the client sends it; To is nil when absent.
+type chatIn struct {
+	CID   string     `json:"cid"`
+	Scope chat.Scope `json:"scope"`
+	To    *string    `json:"to"`
+	Text  string     `json:"text"`
+}
+
 func (moveMsg) clientMsg() {}
 func (pingMsg) clientMsg() {}
+func (chatIn) clientMsg()  {}
+
+// valid checks what a well-formed chat can still get wrong; the answer is a
+// chatError, not a close.
+func (m chatIn) valid(self string) bool {
+	switch {
+	case !m.Scope.Valid():
+		return false
+	case m.Scope != chat.Direct:
+		return m.To == nil
+	}
+	return m.To != nil && *m.To != "" && len(*m.To) <= maxToLen && *m.To != self
+}
+
+func validCID(cid string) bool {
+	if cid == "" || len(cid) > maxCIDLen {
+		return false
+	}
+	for _, c := range []byte(cid) {
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 type playerMsg struct {
 	ID   string    `json:"id"`
@@ -83,6 +132,41 @@ type nearbyMsg struct {
 	IDs []string `json:"ids"`
 }
 
+// chatOut is a chat as clients receive it: At is unix milliseconds, To is
+// set only for direct and CID only in the sender's echo.
+type chatOut struct {
+	ID       string     `json:"id"`
+	At       int64      `json:"at"`
+	From     string     `json:"from"`
+	FromName string     `json:"fromName"`
+	Scope    chat.Scope `json:"scope"`
+	To       string     `json:"to,omitempty"`
+	Text     string     `json:"text"`
+	CID      string     `json:"cid,omitempty"`
+}
+
+type chatHistoryMsg struct {
+	Messages []chatOut `json:"messages"`
+}
+
+type chatErrorMsg struct {
+	CID    string `json:"cid"`
+	Reason string `json:"reason"`
+}
+
+func newChatOut(m chat.Message, cid string) chatOut {
+	return chatOut{
+		ID:       m.ID,
+		At:       m.At.UnixMilli(),
+		From:     m.From,
+		FromName: m.FromName,
+		Scope:    m.Scope,
+		To:       m.To,
+		Text:     m.Text,
+		CID:      cid,
+	}
+}
+
 func newPlayerMsg(p world.Player) playerMsg {
 	return playerMsg{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Dir: p.Dir}
 }
@@ -90,13 +174,13 @@ func newPlayerMsg(p world.Player) playerMsg {
 func decodeClient(b []byte) (clientMsg, error) {
 	var env envelope
 	if err := json.Unmarshal(b, &env); err != nil {
-		return nil, fmt.Errorf("%w: %w", errInvalidMessage, err)
+		return nil, fmt.Errorf("%w: %w", errInvalidMessage, jsonError(err))
 	}
 	switch env.T {
 	case typeMove:
 		var m moveMsg
 		if err := json.Unmarshal(env.D, &m); err != nil {
-			return nil, fmt.Errorf("%w: move: %w", errInvalidMessage, err)
+			return nil, fmt.Errorf("%w: move: %w", errInvalidMessage, jsonError(err))
 		}
 		if !m.Dir.Valid() {
 			return nil, fmt.Errorf("%w: move: dir %q", errInvalidMessage, m.Dir)
@@ -105,11 +189,34 @@ func decodeClient(b []byte) (clientMsg, error) {
 	case typePing:
 		var m pingMsg
 		if err := json.Unmarshal(env.D, &m); err != nil {
-			return nil, fmt.Errorf("%w: ping: %w", errInvalidMessage, err)
+			return nil, fmt.Errorf("%w: ping: %w", errInvalidMessage, jsonError(err))
+		}
+		return m, nil
+	case typeChat:
+		var m chatIn
+		if err := json.Unmarshal(env.D, &m); err != nil {
+			return nil, fmt.Errorf("%w: chat: %w", errInvalidMessage, jsonError(err))
+		}
+		if !validCID(m.CID) {
+			return nil, fmt.Errorf("%w: chat: cid", errInvalidMessage)
 		}
 		return m, nil
 	}
 	return nil, fmt.Errorf("%w: type %q", errInvalidMessage, env.T)
+}
+
+// jsonError keeps where decoding failed and drops what the error quotes
+// from the input, which may be chat text.
+func jsonError(err error) error {
+	var se *json.SyntaxError
+	if errors.As(err, &se) {
+		return fmt.Errorf("syntax error at offset %d", se.Offset)
+	}
+	var te *json.UnmarshalTypeError
+	if errors.As(err, &te) {
+		return fmt.Errorf("field %q: want %v", te.Field, te.Type)
+	}
+	return errors.New("malformed")
 }
 
 func encode(t string, d any) ([]byte, error) {

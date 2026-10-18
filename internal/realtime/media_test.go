@@ -131,6 +131,7 @@ func TestMediaAndNearby(t *testing.T) {
 	if err != nil || env.T != typeNearby || string(env.D) != `{"ids":[]}` {
 		t.Fatalf("third message = %s %s (%v), want empty nearby", env.T, env.D, err)
 	}
+	next[chatHistoryMsg](ana, typeChatHistory)
 
 	bob := dial(t, url, "bob")
 	next[welcomeMsg](bob, typeWelcome)
@@ -189,7 +190,7 @@ func TestMediaRenewal(t *testing.T) {
 		synctest.Wait()
 		start := time.Now()
 		var first mediaMsg
-		for _, typ := range []string{typeWelcome, typeMedia, typeNearby} {
+		for _, typ := range []string{typeWelcome, typeMedia, typeNearby, typeChatHistory} {
 			env := received(t, s)
 			if env.T != typ {
 				t.Fatalf("got %s, want %s", env.T, typ)
@@ -242,9 +243,18 @@ func decode[T any](t *testing.T, env envelope) T {
 	return v
 }
 
+// TestNoMediaWithoutIssuer checks that without media there is no media
+// message while nearby still flows, at join and when the set changes.
 func TestNoMediaWithoutIssuer(t *testing.T) {
 	url := startServer(t)
 	ana := dial(t, url, "Ana")
+	next[welcomeMsg](ana, typeWelcome)
+	if n := next[nearbyMsg](ana, typeNearby); n.IDs == nil || len(n.IDs) != 0 {
+		t.Errorf("first nearby = %#v, want empty", n.IDs)
+	}
+	if h := next[chatHistoryMsg](ana, typeChatHistory); h.Messages == nil || len(h.Messages) != 0 {
+		t.Errorf("history = %#v, want empty", h.Messages)
+	}
 	bob := dial(t, url, "bob")
 	expect[welcomeMsg](bob, typeWelcome, nil)
 
@@ -272,8 +282,8 @@ func TestNoMediaWithoutIssuer(t *testing.T) {
 	ana.send(typePing, pingMsg{TS: 1})
 	read(typePong, func(json.RawMessage) bool { return true })
 
-	if slices.Contains(seen, typeMedia) || slices.Contains(seen, typeNearby) {
-		t.Errorf("messages = %v, want no media or nearby", seen)
+	if slices.Contains(seen, typeMedia) || !slices.Contains(seen, typeNearby) {
+		t.Errorf("messages = %v, want nearby and no media", seen)
 	}
 }
 
@@ -473,7 +483,7 @@ func TestMediaReissuedAfterRemovalRace(t *testing.T) {
 
 		ana := joinAs(t, room, "Ana")
 		synctest.Wait()
-		if got := drain(t, ana); !slices.Equal(got, []string{typeWelcome, typeMedia, typeNearby}) {
+		if got := drain(t, ana); !slices.Equal(got, []string{typeWelcome, typeMedia, typeNearby, typeChatHistory}) {
 			t.Fatalf("messages on rejoin = %v", got)
 		}
 		if got := mi.removals(); len(got) != 0 {

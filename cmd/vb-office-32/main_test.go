@@ -110,7 +110,12 @@ func TestRun(t *testing.T) {
 		t.Errorf("dial while draining: res = %v, err = %v, want 503", res, err)
 	}
 
-	_, _, err = conn.Read(context.Background())
+	// nearby and chatHistory follow welcome.
+	for {
+		if _, _, err = conn.Read(context.Background()); err != nil {
+			break
+		}
+	}
 	var ce websocket.CloseError
 	if !errors.As(err, &ce) || ce.Code != websocket.StatusGoingAway || ce.Reason != "server restarting" {
 		t.Errorf("close on shutdown = %v, want 1001 \"server restarting\"", err)

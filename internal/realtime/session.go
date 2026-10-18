@@ -3,6 +3,7 @@ package realtime
 import (
 	"cmp"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -11,11 +12,12 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
+	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
 const (
-	maxMessageSize = 4 << 10
+	maxMessageSize = 8 << 10
 	sendBuffer     = 64
 	pingInterval   = 20 * time.Second
 	writeTimeout   = 10 * time.Second
@@ -58,26 +60,28 @@ type Session struct {
 	room    *Room
 	log     *slog.Logger
 
-	limiter   tokenBucket
-	out       chan []byte
-	done      chan struct{}
-	ended     chan struct{}
-	closeOnce sync.Once
-	closeWith closeReason
+	limiter     tokenBucket
+	chatLimiter tokenBucket
+	out         chan []byte
+	done        chan struct{}
+	ended       chan struct{}
+	closeOnce   sync.Once
+	closeWith   closeReason
 }
 
 func newSession(id auth.Identity, conn *websocket.Conn, room *Room, log *slog.Logger) *Session {
 	return &Session{
-		id:      id.ID,
-		name:    id.Name,
-		expires: id.Expires,
-		conn:    conn,
-		room:    room,
-		log:     log,
-		limiter: newTokenBucket(messageRate, messageBurst),
-		out:     make(chan []byte, sendBuffer),
-		done:    make(chan struct{}),
-		ended:   make(chan struct{}),
+		id:          id.ID,
+		name:        id.Name,
+		expires:     id.Expires,
+		conn:        conn,
+		room:        room,
+		log:         log,
+		limiter:     newTokenBucket(messageRate, messageBurst),
+		chatLimiter: newTokenBucket(chatRate, chatBurst),
+		out:         make(chan []byte, sendBuffer),
+		done:        make(chan struct{}),
+		ended:       make(chan struct{}),
 	}
 }
 
@@ -159,8 +163,50 @@ func (s *Session) readLoop(ctx context.Context) error {
 				return err
 			}
 			s.send(pong)
+		case chatIn:
+			reason, err := s.chat(ctx, m, time.Now())
+			if err != nil {
+				return err
+			}
+			if reason != "" {
+				s.log.Debug("chat rejected", "reason", reason)
+				s.sendChatError(m.CID, reason)
+			}
 		}
 	}
+}
+
+// chat validates, cleans and rate-limits a chat before the room routes it,
+// so the room goroutine never spends time on text. Only a valid chat spends
+// a chat token.
+func (s *Session) chat(ctx context.Context, m chatIn, now time.Time) (string, error) {
+	if !m.valid(s.id) {
+		return chatInvalid, nil
+	}
+	text, err := chat.Clean(m.Text)
+	switch {
+	case errors.Is(err, chat.ErrEmpty):
+		return chatEmpty, nil
+	case errors.Is(err, chat.ErrTooLong):
+		return chatTooLong, nil
+	}
+	if !s.chatLimiter.allow(now) {
+		return chatRateLimited, nil
+	}
+	c := sessionChat{sess: s, cid: m.CID, scope: m.Scope, text: text}
+	if m.To != nil {
+		c.to = *m.To
+	}
+	return "", s.room.chat(ctx, c)
+}
+
+func (s *Session) sendChatError(cid, reason string) {
+	msg, err := encode(typeChatError, chatErrorMsg{CID: cid, Reason: reason})
+	if err != nil {
+		s.log.Error("encode chat error", "err", err)
+		return
+	}
+	s.send(msg)
 }
 
 func (s *Session) writeLoop(ctx context.Context) {
