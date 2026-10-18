@@ -30,8 +30,8 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 { "t": "<tipo>", "d": { ... } }
 ```
 
-- Mensagem do cliente > 4 KiB ou inválida → close 1008.
-- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`.
+- Mensagem do cliente > 8 KiB ou inválida → close 1008.
+- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`. O chat tem um limite próprio, que não fecha a conexão (ver [Chat](#chat)).
 - Cliente lento (buffer de envio cheio, 64 mensagens) → close 1008 reason `"slow consumer"`.
 - Shutdown do servidor → close 1001 reason `"server restarting"`. O cliente reconecta com backoff.
 
@@ -58,6 +58,7 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 |---|---|---|
 | `move` | `{ seq: number, dir: Dir }` | Intenção de 1 passo. `seq` uint32 crescente por conexão. Fila por jogador com cap `MaxPendingInputs` (8); excedente descartado. |
 | `ping` | `{ ts: number }` | Servidor responde `pong` com mesmo `ts`. |
+| `chat` | `{ cid: string, scope: Scope, to?: string, text: string }` | Ver [Chat](#chat). `cid` é do cliente, só para casar eco e erro. |
 
 ## Servidor → Cliente
 
@@ -69,16 +70,19 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 | `state` | `{ tick: number, ack: number, players: Pos[] }` | Fim de tick em que houve mudança OU o `ack` do destinatário avançou. `players` = só quem mudou posição/direção no tick. `ack` = último `seq` processado do destinatário (0 se nenhum). |
 | `pong` | `{ ts: number }` | Resposta a `ping`. |
 | `media` | `{ url: string, token: string, expiresAt: number }` | Só com mídia configurada. Logo após `welcome` e reemitido a cada ~5 min (verificação a cada 1 min, então entre 5 e 6 min). `url` = URL WS do LiveKit; `token` = JWT de acesso (TTL 10 min); `expiresAt` = expiração do token em unix **ms**. |
-| `nearby` | `{ ids: string[] }` | Só com mídia configurada. Logo após `media` (mesmo vazio) e no fim de todo tick em que o conjunto do destinatário mudou (depois do `state` desse tick, se houver). Conjunto audível completo, ordenado, sem o próprio. |
+| `nearby` | `{ ids: string[] }` | Sempre, com ou sem mídia. Ao conectar (mesmo vazio) e no fim de todo tick em que o conjunto do destinatário mudou (depois do `state` desse tick, se houver). Conjunto completo de quem está perto, ordenado, sem o próprio. |
+| `chat` | `Chat` | Mensagem de chat para o destinatário, ou eco para o remetente (com `cid`). |
+| `chatHistory` | `{ messages: Chat[] }` | Ao conectar, sempre (mesmo vazio): últimas ≤ 100 mensagens `everyone`, mais antiga primeiro, sem `cid`. |
+| `chatError` | `{ cid: string, reason: "invalid" \| "empty" \| "too_long" \| "rate_limited" \| "offline" }` | Chat recusado; só para o remetente. |
 
-Ordem ao conectar com mídia: `welcome` → `media` → `nearby`; só então os outros recebem `joined`. Sem mídia configurada o servidor nunca envia `media` nem `nearby`; clientes antigos ignoram tipos desconhecidos.
+Ordem ao conectar: `welcome` → `media` (só com mídia) → `nearby` → `chatHistory`; só então os outros recebem `joined`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
 
-## Proximidade (mídia)
+## Proximidade
 
 - Distância euclidiana em tiles, em inteiros: `d² = dx² + dy²`.
 - Par entra no conjunto com `d² ≤ 16` (4 tiles) e sai com `d² > 25` (5 tiles); `16 < d² ≤ 25` mantém o estado anterior (histerese).
 - Simétrica: A está no conjunto de B ⇔ B está no de A. Paredes não bloqueiam.
-- Calculada no tick: só posição conta (virar não muda nada). Jogador novo é avaliado no tick seguinte à entrada, por isso o primeiro `nearby` dele vem vazio; reconexão da mesma identidade mantém o conjunto. Quem sai é removido dos vizinhos, que recebem `nearby` no tick seguinte.
+- Vale para mídia e para o chat `nearby`. Calculada no tick: só posição conta (virar não muda nada). Jogador novo é avaliado no tick seguinte à entrada, por isso o primeiro `nearby` dele vem vazio; reconexão da mesma identidade mantém o conjunto. Quem sai é removido dos vizinhos, que recebem `nearby` no tick seguinte.
 - Volume (cliente, fase 3b): 1,0 em `d ≤ 1`, linear até 0,2 em `d = 4`, 0,2 na faixa de histerese, 0 fora do conjunto.
 
 ### Token LiveKit
@@ -86,6 +90,34 @@ Ordem ao conectar com mídia: `welcome` → `media` → `nearby`; só então os 
 - JWT HS256 assinado com o segredo da API LiveKit. Claims: `iss` = API key, `sub` = ID do jogador, `name` = nome de exibição, `nbf`, `iat`, `exp`, `video`.
 - `video`: `{"room":"<espaço>","roomJoin":true,"canPublish":true,"canPublishSources":["microphone","camera"],"canSubscribe":true,"canPublishData":false,"canUpdateOwnMetadata":false}`.
 - O LiveKit renova sozinho o token de quem está conectado; o `media` novo só serve para um `connect` futuro. O cliente nunca reconecta a sala ao receber `media`.
+
+## Chat
+
+```ts
+type Scope = "everyone" | "nearby" | "direct"
+type Chat  = { id: string; at: number; from: string; fromName: string; scope: Scope; to?: string; text: string; cid?: string }
+```
+
+- `id` gerado pelo servidor (prefixo aleatório do boot + contador base 36), único no processo; `at` = hora do servidor em unix **ms**; `from` = id do remetente; `fromName` = nome da sessão do remetente no envio (nunca vem do cliente). `to` só em `direct`; `cid` só no eco para o remetente.
+- Destinatários, sempre com eco para o remetente:
+  - `everyone`: todos no espaço. Entra no histórico (100 mensagens, em memória; perde no restart).
+  - `nearby`: o conjunto `nearby` do remetente no último tick. Vazio → só o eco.
+  - `direct`: o jogador `to`, se conectado; senão `chatError offline` (sem fila; id inexistente recebe a mesma resposta).
+- `nearby` e `direct` nunca entram no histórico.
+- Close 1008 (mensagem inválida): JSON inválido, tipo errado em qualquer campo, `cid` ausente, vazio, com mais de 36 caracteres ou fora de `[A-Za-z0-9_-]`.
+- `chatError`, sem fechar a conexão, verificado nesta ordem (o primeiro que falhar responde):
+  1. `invalid`: `scope` desconhecido ou ausente; `direct` sem `to` ou com `to` vazio; `to` presente fora de `direct`; `to` igual ao próprio id; `to` com mais de 300 bytes.
+  2. `empty` / `too_long`: texto vazio depois da limpeza; mais de 500 runes (code points) ou mais de 20 linhas depois da limpeza. O servidor nunca trunca.
+  3. `rate_limited`: token bucket próprio do chat, 0,5/s com burst 5 (5 seguidas, depois 1 a cada 2 s). Só mensagem que passou nas regras acima gasta token. O bucket geral de 20/s conta toda mensagem antes disso.
+  4. `offline`: `direct` para quem não está conectado.
+- Limpeza do texto, nesta ordem (o texto entregue é o limpo):
+  1. UTF-8 inválido → U+FFFD.
+  2. `\r\n`, `\r`, U+0085, U+2028, U+2029 → `\n`; `\t` → espaço.
+  3. Remove controles (`Cc`) exceto `\n` e formatação (`Cf`): bidi (U+202A–202E, U+2066–2069, U+200E/F, U+061C), BOM, soft hyphen, U+200B, tags U+E0000–E007F etc.
+  4. Exceção: ZWJ (U+200D) e ZWNJ (U+200C) ficam quando a rune anterior existe e não é ASCII, espaço nem formatação, e a próxima rune que não seja ZWJ/ZWNJ existe e não é espaço; repetidos colapsam no primeiro. Preserva emoji compostos (👨‍👩‍👧, 🏳️‍🌈, tons de pele), bandeiras e o ZWNJ do persa.
+  5. Remove espaços no fim de cada linha; mais de 3 `\n` seguidos viram 3; trim nas pontas. Sem normalização Unicode (NFC).
+- O cliente exibe só como texto (`textContent`), nunca como HTML ou markdown. Pode espelhar a limpeza para contar caracteres, mas o servidor decide.
+- O servidor nunca loga texto, `to` nem `cid`; só `chat rejected` com o motivo, em debug.
 
 ## Regras de movimento (servidor autoritativo)
 

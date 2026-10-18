@@ -53,8 +53,9 @@ on, none turns it off, and a partial set is an error.
 ## Audio and video
 
 With the LiveKit variables set, each player gets a LiveKit token right after
-`welcome` (`media`) and the set of players within earshot (`nearby`): a pair
-becomes near at 4 tiles and stops at more than 5. Tokens last 10 minutes and
+`welcome` (`media`). Media or not, the server sends each player the set of
+players within earshot (`nearby`): a pair becomes near at 4 tiles and stops
+at more than 5. Tokens last 10 minutes and
 are reissued about every 5 (the server checks once a minute); the server
 never logs them. A player whose WebSocket stays closed for 30 seconds is
 removed from the LiveKit room through its API, since LiveKit would otherwise
@@ -80,6 +81,22 @@ make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networki
 starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is `ws://localhost` or
 `ws://127.0.0.1`. In guest mode run
 `make livekit`, `make run` and `make web-dev`.
+
+## Chat
+
+Players chat with everyone in the space, with whoever is `nearby` at the
+moment of sending, or directly with one player who is online (otherwise the
+sender gets `offline`; nothing is queued). The server cleans the text
+(invalid UTF-8, control and bidi/format characters, trailing spaces, runs of
+blank lines; emoji sequences and the Persian ZWNJ survive), refuses it when
+empty or over 500 characters or 20 lines instead of truncating, and allows
+each connection 5 chats in a row and then one every 2 seconds
+(`rate_limited`, without closing the connection). The sender's name comes
+from its session. The last 100 `everyone` messages are kept in memory and
+sent to whoever joins; `nearby` and direct messages are never kept, and
+nothing survives a restart. Message text, recipients and client ids never
+reach the logs. Rules and formats are in the
+[protocol spec](specs/phase1-protocol.md#chat).
 
 ## Login
 
@@ -167,6 +184,7 @@ make test        # go test -race ./...
 make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
+make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -chat"   # bots also chat, reports echo latency
 
 # token, removal and reconciliation checks against a running LiveKit (make livekit)
 VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime

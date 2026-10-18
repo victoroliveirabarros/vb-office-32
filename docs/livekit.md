@@ -7,7 +7,8 @@ hands out LiveKit access tokens (`media`). The protocol is in
 [`specs/phase1-protocol.md`](../specs/phase1-protocol.md).
 
 Media is optional. Without the LiveKit variables the server sends no
-`media` or `nearby` messages and everything else works the same.
+`media` messages and everything else works the same; `nearby` still goes
+out, since the chat uses it too.
 
 ## Configuration
 
