@@ -3,8 +3,8 @@
 A small virtual office: a tile map where teammates walk around in
 real time. The Go server is authoritative; the browser client lives in `web/`.
 Proximity audio and video go through a self-hosted LiveKit server: the Go
-server decides who is near whom and hands out tokens (the browser side is
-in progress).
+server decides who is near whom and hands out tokens, and the browser
+subscribes only to those players.
 
 ## Run
 
@@ -56,6 +56,14 @@ With the LiveKit variables set, each player gets a LiveKit token right after
 becomes near at 4 tiles and stops at more than 5. Tokens last 10 minutes and
 are reissued every 5; the server never logs them. Network, cost and a
 minimal LiveKit configuration are in [`docs/livekit.md`](docs/livekit.md).
+
+In the browser the LiveKit SDK loads only when the first `media` arrives.
+The microphone turns on at join (a mute is remembered in `localStorage`),
+the camera starts off, and the buttons at the bottom toggle both. Everyone
+in `nearby` is heard, louder when closer (full volume up to 1 tile, down to
+20% at 4); the cameras of the 8 closest show as small tiles at the top, and
+a ring marks who is speaking. When the browser blocks autoplay an "Ativar
+áudio" button appears.
 
 ```sh
 make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networking

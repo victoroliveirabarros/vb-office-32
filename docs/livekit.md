@@ -113,13 +113,17 @@ subscribes to, so traffic grows with the size of each conversation, not
 with the size of the office. The client keeps it down by:
 
 - subscribing only to players in `nearby`;
-- leaving the camera off by default and sending small video (about 180p)
-  with simulcast, so the SFU forwards the lowest layer that fits;
+- leaving the camera off by default and subscribing to the cameras of the
+  8 closest players only;
+- sending small video with simulcast: the camera opens at 360p (the SDK
+  only simulcasts captures at least 480 px wide) with a 90p layer, which is
+  what the 160x90 tiles pull, and a top layer capped at the 180p bitrate
+  (160 kbit/s);
 - adaptive stream (no video for hidden or tiny tiles) and dynacast (the
   publisher stops encoding layers nobody watches).
 
 Audio is roughly 30 to 50 kbit/s per subscribed speaker; small video adds
-about 100 to 200 kbit/s per subscribed camera.
+about 90 kbit/s per subscribed camera (160 kbit/s at most).
 
 ## Metrics to watch
 
@@ -143,6 +147,13 @@ make livekit   # LiveKit --dev on :7880 with key devkey and secret secret
 `VB_OFFICE32_LIVEKIT_URL` is set. In guest mode run `make livekit`,
 `make run` and `make web-dev`. The browser connects to LiveKit directly;
 Vite does not proxy it.
+
+Two people on one machine: open two windows with different guest names (or
+a normal and a private window in oidc mode). Chrome can stand in fake
+devices with `--use-fake-device-for-media-stream
+--use-fake-ui-for-media-stream`. Walk within 4 tiles to hear each other and
+more than 5 apart to stop; turn a camera on to see its tile on the other
+side.
 
 `make livekit` passes `--bind 127.0.0.1` because `--dev` alone also binds
 `::1` and fails on hosts without IPv6 loopback. It uses host networking,

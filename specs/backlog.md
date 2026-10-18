@@ -19,6 +19,10 @@ Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisõ
 
 Escopo e decisões em [`phase3.md`](phase3.md). Envs `VB_OFFICE32_LIVEKIT_URL`, `VB_OFFICE32_LIVEKIT_API_KEY` (não é segredo: vai no `iss`), `VB_OFFICE32_LIVEKIT_API_SECRET` (segredo) no README e em `docs/livekit.md`; mensagens `media`/`nearby` e regra de proximidade em `phase1-protocol.md`.
 
+## Fase 3b — cliente de mídia (feito)
+
+`web/src/media` (lógica pura + `MediaClient`, SDK só em `livekit.ts`, carregado sob demanda) e `web/src/ui/media.ts`. Desvio do refinamento: captura da câmera em 360p (não 180p), porque o SDK só faz simulcast com lado maior ≥ 480 px; camadas 90p (a que os tiles puxam) e topo limitado ao bitrate de 180p.
+
 ## Depois da fase 3a
 
 - `RemoveParticipant` (Twirp, stdlib) no leave, com carência de ~30 s para reconexão: revogação real de quem perde o WS, já que o LiveKit renova o token da sessão conectada indefinidamente.
