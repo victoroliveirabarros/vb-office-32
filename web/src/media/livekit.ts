@@ -1,4 +1,4 @@
-import { DisconnectReason, MediaDeviceFailure, Room, RoomEvent, Track, VideoPresets } from 'livekit-client'
+import { AudioPresets, DisconnectReason, MediaDeviceFailure, Room, RoomEvent, Track, VideoPresets } from 'livekit-client'
 import type { LocalTrack, Participant, RemoteTrack } from 'livekit-client'
 import { DeviceFailure } from './client'
 import type { DeviceError, MediaRoom, RoomListener } from './client'
@@ -9,6 +9,8 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
   // The SDK only simulcasts captures at least 480 px wide, so the camera
   // opens at 360p with its top layer capped at the 180p bitrate; tiles pull
   // the 90p layer and dynacast pauses the top one while nobody wants it.
+  // RED doubles the speech bitrate but is what survives loss on the way to
+  // subscribers (docs/livekit.md).
   const room = new Room({
     adaptiveStream: true,
     dynacast: true,
@@ -17,6 +19,7 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
       simulcast: true,
       videoSimulcastLayers: [VideoPresets.h90],
       videoEncoding: VideoPresets.h180.encoding,
+      audioPreset: AudioPresets.speech,
       dtx: true,
       red: true,
     },
@@ -40,7 +43,9 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
   room
     .on(RoomEvent.Connected, changed)
     .on(RoomEvent.ParticipantConnected, changed)
+    .on(RoomEvent.ParticipantDisconnected, changed)
     .on(RoomEvent.TrackPublished, changed)
+    .on(RoomEvent.TrackUnpublished, changed)
     .on(RoomEvent.TrackMuted, remoteChanged)
     .on(RoomEvent.TrackUnmuted, remoteChanged)
     .on(RoomEvent.SignalReconnecting, () => listener.reconnecting())
