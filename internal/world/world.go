@@ -76,11 +76,13 @@ type Input struct {
 
 // Delta is the outcome of a Step. Moved holds players whose position or
 // direction changed, sorted by ID; Acks holds the new ack of every player
-// that consumed an input.
+// that consumed an input; Nearby holds the sorted near set of every player
+// whose set changed since the previous Step.
 type Delta struct {
-	Tick  uint64
-	Moved []Player
-	Acks  map[string]uint32
+	Tick   uint64
+	Moved  []Player
+	Acks   map[string]uint32
+	Nearby map[string][]string
 }
 
 type player struct {
@@ -106,6 +108,10 @@ type Space struct {
 	lastOrder uint64
 	nextSpawn int
 	tick      uint64
+
+	near        map[string]map[string]struct{}
+	nearPending map[string]struct{}
+	nearBefore  map[string][]string
 }
 
 func NewSpace(m *tilemap.Map) *Space {
@@ -114,11 +120,16 @@ func NewSpace(m *tilemap.Map) *Space {
 		players: make(map[string]*player),
 		last:    make(map[string]lastSeen),
 		lastCap: maxLast,
+
+		near:        make(map[string]map[string]struct{}),
+		nearPending: make(map[string]struct{}),
+		nearBefore:  make(map[string][]string),
 	}
 }
 
 // Join adds a player or, if id is already present, resets its input state
-// for a new connection while keeping its position.
+// for a new connection while keeping its position and near set. A new
+// player's near set is computed by the next Step.
 func (s *Space) Join(id, name string) Player {
 	if p, ok := s.players[id]; ok {
 		p.Name = name
@@ -136,6 +147,7 @@ func (s *Space) Join(id, name string) Player {
 		s.nextSpawn++
 	}
 	s.players[id] = p
+	s.nearPending[id] = struct{}{}
 	return p.Player
 }
 
@@ -147,6 +159,7 @@ func (s *Space) Leave(id string) {
 	s.lastOrder++
 	s.last[id] = lastSeen{pos: p.Pos, dir: p.Dir, order: s.lastOrder}
 	delete(s.players, id)
+	s.dropNear(id)
 	if len(s.last) > s.lastCap {
 		s.evictOldest()
 	}
@@ -182,6 +195,11 @@ func (s *Space) Enqueue(id string, in Input) error {
 func (s *Space) Step(now time.Time) Delta {
 	s.tick++
 	d := Delta{Tick: s.tick}
+	check := make([]string, 0, len(s.nearPending))
+	for id := range s.nearPending {
+		check = append(check, id)
+	}
+	clear(s.nearPending)
 	for _, p := range s.players {
 		if now.Before(p.nextStep.Add(-stepSlack)) {
 			continue
@@ -202,12 +220,16 @@ func (s *Space) Step(now time.Time) Delta {
 		if p.Player != before {
 			d.Moved = append(d.Moved, p.Player)
 		}
+		if p.Pos != before.Pos {
+			check = append(check, p.ID)
+		}
 		if d.Acks == nil {
 			d.Acks = make(map[string]uint32)
 		}
 		d.Acks[p.ID] = in.Seq
 	}
 	slices.SortFunc(d.Moved, byID)
+	d.Nearby = s.stepNear(check)
 	return d
 }
 

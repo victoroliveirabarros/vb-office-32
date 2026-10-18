@@ -13,7 +13,7 @@ import (
 
 // asciiMap builds a map where '#' is a wall and digits are spawn points,
 // ordered by digit.
-func asciiMap(t *testing.T, rows ...string) *tilemap.Map {
+func asciiMap(t testing.TB, rows ...string) *tilemap.Map {
 	t.Helper()
 	w, h := len(rows[0]), len(rows)
 	walls := make([]int, 0, w*h)
