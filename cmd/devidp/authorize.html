@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>devidp</title>
+<style nonce="{{.CSPNonce}}">
+  body { font: 15px/1.4 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; color: #222; background: #fafafa; }
+  .warn { background: #fff3cd; border: 1px solid #e0c060; padding: .5rem .75rem; border-radius: 4px; }
+  .err { background: #fde2e1; border: 1px solid #d88; padding: .5rem .75rem; border-radius: 4px; }
+  fieldset { border: 1px solid #ccc; border-radius: 4px; margin: 1rem 0; }
+  label { display: block; margin: .5rem 0; }
+  input[type=text], input[type=email] { width: 100%; box-sizing: border-box; padding: .35rem; }
+  button { margin: .25rem 0; padding: .4rem .8rem; cursor: pointer; }
+  .preset { display: block; width: 100%; text-align: left; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>devidp</h1>
+<p class="warn">Provedor OIDC de desenvolvimento: entra quem preencher o formulário. Nunca use fora da máquina local.</p>
+{{if .Error}}
+<p class="err">{{.Error}}</p>
+{{else}}
+<p><small>client_id <code>{{.ClientID}}</code> → <code>{{.RedirectURI}}</code></small></p>
+<form method="post" action="/authorize">
+  {{range .Hidden}}<input type="hidden" name="{{index . 0}}" value="{{index . 1}}">
+  {{end}}
+  <fieldset>
+    <legend>Usuários pré-definidos</legend>
+    {{range .Presets}}<button class="preset" type="submit" name="preset" value="{{.ID}}" formnovalidate>{{.Name}} &lt;{{.Email}}&gt; <small>— {{.Note}}</small></button>
+    {{end}}
+  </fieldset>
+  <fieldset>
+    <legend>Usuário personalizado</legend>
+    <label>Nome <input type="text" name="name" value="{{.Default.Name}}"></label>
+    <label>Email <input type="email" id="email" name="email" value="{{.Default.Email}}" required></label>
+    <label><input type="checkbox" name="email_verified" value="true" checked> email_verified</label>
+    <label>hd <small>(opcional; vazio omite o claim)</small> <input type="text" id="hd" name="hd" value="{{.Default.HD}}"></label>
+    <button type="submit">Entrar</button>
+    <button type="submit" name="action" value="deny" formnovalidate>Negar (access_denied)</button>
+  </fieldset>
+</form>
+<script nonce="{{.CSPNonce}}">
+  const email = document.getElementById('email');
+  const hd = document.getElementById('hd');
+  let edited = false;
+  hd.addEventListener('input', () => { edited = true; });
+  email.addEventListener('input', () => {
+    if (edited) return;
+    const i = email.value.lastIndexOf('@');
+    hd.value = i > 0 ? email.value.slice(i + 1) : '';
+  });
+</script>
+{{end}}
+</body>
+</html>
