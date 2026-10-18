@@ -5,8 +5,9 @@ export
 GO      ?= go
 BIN     := bin
 LOADBOT_FLAGS ?= -n 50 -duration 20s
+DEVIDP_FLAGS  ?=
 
-.PHONY: run test vet lint build loadbot web-dev web-build
+.PHONY: run test vet lint build loadbot web-dev web-build devidp dev-oidc
 
 run:
 	$(GO) run ./cmd/vb-office-32
@@ -29,6 +30,16 @@ build:
 
 loadbot:
 	$(GO) run ./cmd/loadbot $(LOADBOT_FLAGS)
+
+# Development OIDC provider on 127.0.0.1:9000; never deploy it.
+devidp:
+	$(GO) run ./cmd/devidp $(DEVIDP_FLAGS)
+
+# devidp, the server and Vite together; Ctrl-C stops all three.
+dev-oidc:
+	@test "$$VB_OFFICE32_AUTH" = oidc && test -n "$$VB_OFFICE32_SESSION_KEY" || \
+		{ echo "dev-oidc: .env needs the OIDC block of .env.example with VB_OFFICE32_SESSION_KEY set"; exit 1; }
+	$(MAKE) -j3 devidp run web-dev
 
 web-dev:
 	cd web && npm run dev
