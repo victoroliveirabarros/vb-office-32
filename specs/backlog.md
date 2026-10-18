@@ -1,14 +1,27 @@
 # Backlog
 
-## Fase 2
+## Fase 2b — login OIDC
 
-- Rate limit de mensagens por sessão (`move`/`ping`), fechando com 1008 ao exceder.
-- Limite de conexões simultâneas (global e por IP).
-- Limite de `Space.last` (última posição por identidade): hoje cresce sem limite durante a vida do processo; definir TTL ou tamanho máximo com expulsão.
-- `VB_OFFICE32_ALLOWED_ORIGINS`: default vazio (só mesma origem). Hoje `env()` trata vazio como ausente e o default `localhost:5173,127.0.0.1:5173` vale em produção. Origens do Vite passam a ser definidas pelo `make web-dev`/`make run`.
-- `.env.example` versionado com todas as `VB_OFFICE32_*` (valores de dev, segredos vazios); `.env` no `.gitignore`; `Makefile` carrega `.env` se existir.
-- Novas envs: `VB_OFFICE32_PUBLIC_URL`, `VB_OFFICE32_GOOGLE_CLIENT_ID`, `VB_OFFICE32_GOOGLE_CLIENT_SECRET` (segredo), `VB_OFFICE32_ALLOWED_DOMAINS`, `VB_OFFICE32_SESSION_KEY` (segredo). Config falha no boot se SSO habilitado e faltar alguma; segredos nunca logados.
+Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisões de segurança").
+
+- Novas envs: `VB_OFFICE32_AUTH` (`oidc|guest`, default `oidc`), `VB_OFFICE32_PUBLIC_URL`, `VB_OFFICE32_OIDC_ISSUER`, `VB_OFFICE32_OIDC_CLIENT_ID`, `VB_OFFICE32_OIDC_CLIENT_SECRET` (segredo), `VB_OFFICE32_ALLOWED_DOMAINS`, `VB_OFFICE32_SESSION_KEY` (segredo). Config falha no boot se `AUTH=oidc` e faltar alguma; segredos nunca logados. Entram em `config.go`, `.env.example`, README e `docs/deploy.md`.
+- Contrato: identidade `oidc:<sub>`, close 4002 `"session expired"`, nome por modo.
+
+## Depois da fase 2
+
+- `VB_OFFICE32_SESSION_KEY_PREVIOUS`: aceitar a chave anterior na validação para rotacionar sem derrubar sessões.
+- Revogação de sessão no servidor (hoje o cookie vale até expirar, salvo domínio removido da config).
+- `prompt=select_account` no login, para trocar de conta Google sem sair do provedor.
+- CSP e demais headers de segurança nas páginas.
+- Logout RP-initiated (`end_session_endpoint`) quando o provedor suportar.
+- Job no CI com `docker buildx build --platform linux/amd64,linux/arm64`.
+- `govulncheck` no CI. Bloqueado: com Go 1.25.14 (último patch da 1.25) o scan aponta 10 vulnerabilidades alcançáveis em `net/http`, `net/textproto` e `crypto/tls`, corrigidas só no Go 1.26.9. Entra junto com a subida para Go 1.26.
 
 ## Fase 3
 
 - Envs LiveKit: `VB_OFFICE32_LIVEKIT_URL`, `VB_OFFICE32_LIVEKIT_API_KEY` (segredo), `VB_OFFICE32_LIVEKIT_API_SECRET` (segredo).
+- Métricas Prometheus (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack).
+
+## Descartado
+
+- Limite de conexões por IP. Atrás de proxy/load balancer o servidor só vê o IP do proxy; o IP real chega por `X-Forwarded-For`, que o cliente consegue forjar a menos que a cadeia de proxies confiáveis seja configurada. Um limite assim seria contornável ou bloquearia todos atrás do mesmo proxy. O limite global (`VB_OFFICE32_MAX_SESSIONS`), o rate limit por conexão e a autenticação cobrem o risco.
