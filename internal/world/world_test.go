@@ -317,3 +317,30 @@ func TestStepPlayersDoNotCollide(t *testing.T) {
 		t.Errorf("tick = %d, want 1", d.Tick)
 	}
 }
+
+func TestLastPositionsAreCapped(t *testing.T) {
+	s := NewSpace(asciiMap(t, "0..."))
+	s.lastCap = 2
+	for i, id := range []string{"a", "b", "c"} {
+		s.Join(id, id)
+		enqueue(t, s, id, 1, Right)
+		s.Step(at(i))
+		s.Leave(id)
+	}
+	if got := len(s.last); got != 2 {
+		t.Fatalf("last entries = %d, want 2", got)
+	}
+	if _, ok := s.last["a"]; ok {
+		t.Error("oldest entry a was kept")
+	}
+
+	if got := s.Join("b", "b").Pos; got != (tilemap.Point{X: 1}) {
+		t.Errorf("b rejoined at %v, want last position {1 0}", got)
+	}
+	if _, ok := s.last["b"]; ok {
+		t.Error("b's entry kept after rejoin")
+	}
+	if got := s.Join("a", "a").Pos; got != (tilemap.Point{}) {
+		t.Errorf("evicted a joined at %v, want spawn {0 0}", got)
+	}
+}
