@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -17,14 +18,18 @@ const (
 	shutdownTimeout = 5 * time.Second
 	// mediaCheck is how often grants due for renewal are reissued.
 	mediaCheck = time.Minute
+	// removeGrace is how long an identity that left keeps its media
+	// connection, so a reconnecting WebSocket does not drop the call.
+	removeGrace = 30 * time.Second
 )
 
 var errRoomClosed = errors.New("room closed")
 
-// MediaIssuer grants access to the media server; a nil MediaIssuer turns
+// Media grants and revokes access to the media server; a nil Media turns
 // media off.
-type MediaIssuer interface {
+type Media interface {
 	Issue(identity, name, room string, now time.Time) (media.Grant, error)
+	Remove(ctx context.Context, room, identity string) error
 }
 
 type member struct {
@@ -32,6 +37,14 @@ type member struct {
 	ack  uint32
 	// renewAt is when the member gets a fresh media grant.
 	renewAt time.Time
+}
+
+// removal is a media removal scheduled for an identity that left; seq tells
+// a stale timer from the current one.
+type removal struct {
+	id    string
+	seq   uint64
+	timer *time.Timer
 }
 
 type sessionInput struct {
@@ -45,28 +58,35 @@ type Room struct {
 	id    string
 	mapID string
 	space *world.Space
-	media MediaIssuer
+	media Media
 	log   *slog.Logger
 
-	joins   chan *Session
-	leaves  chan *Session
-	inputs  chan sessionInput
-	done    chan struct{}
-	members map[string]*member
+	joins    chan *Session
+	leaves   chan *Session
+	inputs   chan sessionInput
+	removals chan removal
+	done     chan struct{}
+	members  map[string]*member
+
+	pending  map[string]removal
+	seq      uint64
+	removing sync.WaitGroup
 }
 
-func NewRoom(id, mapID string, space *world.Space, mi MediaIssuer, log *slog.Logger) *Room {
+func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *Room {
 	return &Room{
-		id:      id,
-		mapID:   mapID,
-		space:   space,
-		media:   mi,
-		log:     log.With("room", id),
-		joins:   make(chan *Session),
-		leaves:  make(chan *Session),
-		inputs:  make(chan sessionInput, 256),
-		done:    make(chan struct{}),
-		members: make(map[string]*member),
+		id:       id,
+		mapID:    mapID,
+		space:    space,
+		media:    mi,
+		log:      log.With("room", id),
+		joins:    make(chan *Session),
+		leaves:   make(chan *Session),
+		inputs:   make(chan sessionInput, 256),
+		removals: make(chan removal),
+		done:     make(chan struct{}),
+		members:  make(map[string]*member),
+		pending:  make(map[string]removal),
 	}
 }
 
@@ -92,6 +112,8 @@ func (r *Room) Run(ctx context.Context) error {
 			r.handleLeave(s)
 		case in := <-r.inputs:
 			r.handleInput(in)
+		case rm := <-r.removals:
+			r.handleRemoval(ctx, rm)
 		case now := <-ticker.C:
 			r.tick(now)
 		case now := <-renew:
@@ -101,8 +123,13 @@ func (r *Room) Run(ctx context.Context) error {
 }
 
 // shutdown closes every session and waits, bounded, for their close
-// handshakes so clients see 1001 instead of a dropped connection.
+// handshakes so clients see 1001 instead of a dropped connection. Nobody is
+// removed from media: the clients reconnect to the next process.
 func (r *Room) shutdown() {
+	for id := range r.pending {
+		r.cancelRemoval(id)
+	}
+	defer r.removing.Wait()
 	for _, m := range r.members {
 		m.sess.close(websocket.StatusGoingAway, reasonRestarting)
 	}
@@ -145,6 +172,7 @@ func (r *Room) handleJoin(s *Session) {
 	if replaced {
 		old.sess.close(statusReplaced, reasonReplaced)
 	}
+	r.cancelRemoval(s.id)
 	self := r.space.Join(s.id, s.name)
 	m := &member{sess: s}
 	r.members[s.id] = m
@@ -186,6 +214,47 @@ func (r *Room) handleLeave(s *Session) {
 	r.space.Leave(s.id)
 	r.log.Info("player left", "id", s.id)
 	r.broadcast(typeLeft, leftMsg{ID: s.id}, "")
+	if r.media != nil {
+		r.scheduleRemoval(s.id)
+	}
+}
+
+// scheduleRemoval revokes the media connection of an identity that does not
+// come back within removeGrace: LiveKit renews the token of a connected
+// participant by itself, so leaving the game alone would not end the call.
+func (r *Room) scheduleRemoval(id string) {
+	r.cancelRemoval(id)
+	r.seq++
+	seq := r.seq
+	t := time.AfterFunc(removeGrace, func() {
+		_ = submit(context.Background(), r, r.removals, removal{id: id, seq: seq})
+	})
+	r.pending[id] = removal{id: id, seq: seq, timer: t}
+}
+
+func (r *Room) cancelRemoval(id string) {
+	if rm, ok := r.pending[id]; ok {
+		rm.timer.Stop()
+		delete(r.pending, id)
+	}
+}
+
+// handleRemoval runs the call outside the room goroutine so a slow media
+// server never delays a tick.
+func (r *Room) handleRemoval(ctx context.Context, rm removal) {
+	if p, ok := r.pending[rm.id]; !ok || p.seq != rm.seq {
+		return
+	}
+	delete(r.pending, rm.id)
+	r.removing.Go(func() {
+		if err := r.media.Remove(ctx, r.id, rm.id); err != nil {
+			if ctx.Err() == nil {
+				r.log.Warn("media removal failed", "id", rm.id, "err", err)
+			}
+			return
+		}
+		r.log.Info("removed from media", "id", rm.id)
+	})
 }
 
 func (r *Room) handleInput(in sessionInput) {

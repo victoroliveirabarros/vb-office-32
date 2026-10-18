@@ -17,7 +17,7 @@ import (
 var now = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
 func TestIssue(t *testing.T) {
-	i := NewIssuer("wss://media.example", "key", "s3cr3t")
+	i := NewClient("wss://media.example", "key", "s3cr3t")
 	g, err := i.Issue("oidc:42", "Zé", "office", now.Add(300*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestLiveKitValidate(t *testing.T) {
 	}
 	const key, secret = "devkey", "secret"
 	issued := func(secret string, at time.Time) string {
-		g, err := NewIssuer("ws://unused", key, secret).Issue("guest:ana", "Ana", "office", at)
+		g, err := NewClient("ws://unused", key, secret).Issue("guest:ana", "Ana", "office", at)
 		if err != nil {
 			t.Fatal(err)
 		}

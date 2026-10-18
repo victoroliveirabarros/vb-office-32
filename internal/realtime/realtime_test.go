@@ -32,7 +32,7 @@ func startServerWith(t *testing.T, authn Authenticator, maxSessions int) string 
 	return serve(t, authn, maxSessions, nil)
 }
 
-func serve(t *testing.T, authn Authenticator, maxSessions int, mi MediaIssuer) string {
+func serve(t *testing.T, authn Authenticator, maxSessions int, mi Media) string {
 	t.Helper()
 	m, err := tilemap.LoadFile("testdata/small.tmj")
 	if err != nil {

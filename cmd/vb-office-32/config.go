@@ -116,13 +116,24 @@ func loadOIDC(getenv func(string) string) (auth.OIDCConfig, error) {
 		}
 	}
 	if raw := required("VB_OFFICE32_SESSION_KEY"); raw != "" {
-		key, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil || len(key) < 32 {
-			errs = append(errs, errors.New("VB_OFFICE32_SESSION_KEY: must be standard base64 of at least 32 bytes (openssl rand -base64 32)"))
-		}
+		key, err := sessionKey("VB_OFFICE32_SESSION_KEY", raw)
+		errs = append(errs, err)
 		c.SessionKey = key
 	}
+	if raw := strings.TrimSpace(getenv("VB_OFFICE32_SESSION_KEY_PREVIOUS")); raw != "" {
+		key, err := sessionKey("VB_OFFICE32_SESSION_KEY_PREVIOUS", raw)
+		errs = append(errs, err)
+		c.PreviousSessionKey = key
+	}
 	return c, errors.Join(errs...)
+}
+
+func sessionKey(name, raw string) ([]byte, error) {
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil || len(key) < 32 {
+		return nil, errors.New(name + ": must be standard base64 of at least 32 bytes (openssl rand -base64 32)")
+	}
+	return key, nil
 }
 
 // loadLiveKit requires all three variables or none.

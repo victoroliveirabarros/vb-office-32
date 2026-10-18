@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -67,23 +69,35 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 		log.Warn("guest auth: anyone can join under any name; use only for development")
 	}
 
-	var mi realtime.MediaIssuer
+	var (
+		mi         realtime.Media
+		connectSrc []string
+		formAction []string
+	)
 	if lk := cfg.livekit; lk.url != "" {
-		mi = media.NewIssuer(lk.url, lk.apiKey, lk.apiSecret)
+		mi = media.NewClient(lk.url, lk.apiKey, lk.apiSecret)
+		connectSrc = []string{lk.url, media.HTTPURL(lk.url)}
 		if len(lk.apiSecret) < minSecretLen {
 			log.Warn("VB_OFFICE32_LIVEKIT_API_SECRET is shorter than 32 characters; use a long random secret outside development")
 		}
 	}
 
 	var ready atomic.Bool
+	if cfg.auth == authOIDC {
+		formAction = []string{origin(cfg.oidc.Issuer)}
+	}
+
 	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), mi, log))
 	ws := realtime.NewHandler(hub, authn, cfg.allowedOrigins, cfg.maxSessions, log)
 	srv := httpapi.NewServer(httpapi.NewHandler(httpapi.Options{
-		WS:      ws,
-		Ready:   ready.Load,
-		MapsDir: cfg.mapsDir,
-		WebDir:  cfg.webDir,
-		OIDC:    login,
+		WS:         ws,
+		Ready:      ready.Load,
+		MapsDir:    cfg.mapsDir,
+		WebDir:     cfg.webDir,
+		OIDC:       login,
+		ConnectSrc: connectSrc,
+		FormAction: formAction,
+		HSTS:       strings.HasPrefix(cfg.oidc.PublicURL, "https://"),
 	}))
 	srv.ErrorLog = slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 
@@ -129,4 +143,13 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// origin keeps the scheme and host of a URL loadConfig already validated.
+func origin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }

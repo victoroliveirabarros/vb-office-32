@@ -1,4 +1,5 @@
-// Package media issues LiveKit access tokens.
+// Package media issues LiveKit access tokens and removes participants
+// through the LiveKit room service.
 package media
 
 import (
@@ -6,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"strings"
 	"time"
 )
 
@@ -22,16 +25,38 @@ type Grant struct {
 	ExpiresAt time.Time
 }
 
-// Issuer signs LiveKit access tokens with the API key and secret shared with
-// the LiveKit server.
-type Issuer struct {
+// Client signs LiveKit access tokens with the API key and secret shared with
+// the LiveKit server and calls its room service.
+type Client struct {
 	url    string
+	apiURL string
 	key    string
 	secret []byte
+	http   *http.Client
 }
 
-func NewIssuer(url, apiKey, apiSecret string) *Issuer {
-	return &Issuer{url: url, key: apiKey, secret: []byte(apiSecret)}
+// NewClient takes the ws(s):// URL browsers connect to; the room service is
+// reached at the same host over http(s).
+func NewClient(url, apiKey, apiSecret string) *Client {
+	return &Client{
+		url:    url,
+		apiURL: HTTPURL(url),
+		key:    apiKey,
+		secret: []byte(apiSecret),
+		http:   &http.Client{Timeout: requestTimeout},
+	}
+}
+
+// HTTPURL turns a ws:// or wss:// URL into its http:// or https://
+// counterpart.
+func HTTPURL(wsURL string) string {
+	if rest, ok := strings.CutPrefix(wsURL, "wss://"); ok {
+		return "https://" + rest
+	}
+	if rest, ok := strings.CutPrefix(wsURL, "ws://"); ok {
+		return "http://" + rest
+	}
+	return wsURL
 }
 
 type claims struct {
@@ -58,10 +83,10 @@ type videoGrant struct {
 
 // Issue grants identity, shown as name, the right to join room, publish its
 // microphone and camera and subscribe to others.
-func (i *Issuer) Issue(identity, name, room string, now time.Time) (Grant, error) {
+func (c *Client) Issue(identity, name, room string, now time.Time) (Grant, error) {
 	exp := now.Add(TTL)
 	token, err := sign(claims{
-		Iss:  i.key,
+		Iss:  c.key,
 		Sub:  identity,
 		Name: name,
 		Nbf:  now.Unix(),
@@ -74,14 +99,14 @@ func (i *Issuer) Issue(identity, name, room string, now time.Time) (Grant, error
 			CanPublishSources: []string{"microphone", "camera"},
 			CanSubscribe:      true,
 		},
-	}, i.secret)
+	}, c.secret)
 	if err != nil {
 		return Grant{}, err
 	}
-	return Grant{URL: i.url, Token: token, ExpiresAt: time.Unix(exp.Unix(), 0)}, nil
+	return Grant{URL: c.url, Token: token, ExpiresAt: time.Unix(exp.Unix(), 0)}, nil
 }
 
-func sign(c claims, secret []byte) (string, error) {
+func sign(c any, secret []byte) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return "", err

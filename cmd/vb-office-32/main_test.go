@@ -137,6 +137,10 @@ func TestRunOIDC(t *testing.T) {
 	if res.StatusCode != http.StatusUnauthorized || string(body) != `{"auth":"oidc"}`+"\n" {
 		t.Errorf("/api/session = %d %s", res.StatusCode, body)
 	}
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self' http://127.0.0.1:1;") ||
+		!strings.Contains(csp, "connect-src 'self';") || res.Header.Get("Strict-Transport-Security") != "" {
+		t.Errorf("headers = %v, want the issuer in form-action and no HSTS over http", res.Header)
+	}
 	if got := status(t, "http://"+addr+"/auth/login"); got != http.StatusServiceUnavailable {
 		t.Errorf("/auth/login with provider down = %d, want 503", got)
 	}
@@ -145,6 +149,27 @@ func TestRunOIDC(t *testing.T) {
 		t.Errorf("dial without session: res = %v, err = %v, want 401", res, err)
 	}
 
+	cancel()
+	if err := <-errc; err != nil {
+		t.Errorf("run: %v", err)
+	}
+}
+
+func TestRunHSTS(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	vars := oidcEnv()
+	vars["VB_OFFICE32_PUBLIC_URL"] = "https://office.example"
+	addr, errc := start(t, ctx, vars)
+
+	res, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if got := res.Header.Get("Strict-Transport-Security"); got != "max-age=31536000" {
+		t.Errorf("Strict-Transport-Security = %q with an https public URL", got)
+	}
 	cancel()
 	if err := <-errc; err != nil {
 		t.Errorf("run: %v", err)
@@ -218,12 +243,13 @@ func TestLoadConfig(t *testing.T) {
 
 func TestLoadConfigErrorsNameVariableNotValue(t *testing.T) {
 	_, err := loadConfig(env(map[string]string{
-		"VB_OFFICE32_MAX_SESSIONS":    "s3cr3t-sessions",
-		"VB_OFFICE32_LOG_LEVEL":       "s3cr3t-level",
-		"VB_OFFICE32_PUBLIC_URL":      "http://s3cr3t.example",
-		"VB_OFFICE32_OIDC_ISSUER":     "ftp://s3cr3t.example",
-		"VB_OFFICE32_ALLOWED_DOMAINS": "s3cr3t@example.com",
-		"VB_OFFICE32_SESSION_KEY":     "s3cr3t-key",
+		"VB_OFFICE32_MAX_SESSIONS":         "s3cr3t-sessions",
+		"VB_OFFICE32_LOG_LEVEL":            "s3cr3t-level",
+		"VB_OFFICE32_PUBLIC_URL":           "http://s3cr3t.example",
+		"VB_OFFICE32_OIDC_ISSUER":          "ftp://s3cr3t.example",
+		"VB_OFFICE32_ALLOWED_DOMAINS":      "s3cr3t@example.com",
+		"VB_OFFICE32_SESSION_KEY":          "s3cr3t-key",
+		"VB_OFFICE32_SESSION_KEY_PREVIOUS": "s3cr3t-previous",
 	}))
 	if err == nil {
 		t.Fatal("loadConfig succeeded, want error")
@@ -231,7 +257,8 @@ func TestLoadConfigErrorsNameVariableNotValue(t *testing.T) {
 	msg := err.Error()
 	for _, want := range []string{
 		"VB_OFFICE32_MAX_SESSIONS", "VB_OFFICE32_LOG_LEVEL", "VB_OFFICE32_PUBLIC_URL", "VB_OFFICE32_OIDC_ISSUER",
-		"VB_OFFICE32_ALLOWED_DOMAINS", "VB_OFFICE32_SESSION_KEY", "VB_OFFICE32_OIDC_CLIENT_ID", "VB_OFFICE32_OIDC_CLIENT_SECRET",
+		"VB_OFFICE32_ALLOWED_DOMAINS", "VB_OFFICE32_SESSION_KEY:", "VB_OFFICE32_SESSION_KEY_PREVIOUS:",
+		"VB_OFFICE32_OIDC_CLIENT_ID", "VB_OFFICE32_OIDC_CLIENT_SECRET",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not name %s", msg, want)
@@ -253,8 +280,14 @@ func TestLoadConfigOIDC(t *testing.T) {
 	o := cfg.oidc
 	if cfg.auth != "oidc" || o.PublicURL != "https://office.example" || o.Issuer != "https://accounts.google.com" ||
 		o.ClientID != "client" || o.ClientSecret != "secret" || len(o.SessionKey) != 32 ||
-		!slices.Equal(o.AllowedDomains, []string{"example.com", "example.org"}) {
+		!slices.Equal(o.AllowedDomains, []string{"example.com", "example.org"}) || o.PreviousSessionKey != nil {
 		t.Errorf("oidc config = %+v", o)
+	}
+
+	vars["VB_OFFICE32_SESSION_KEY_PREVIOUS"] = "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA="
+	cfg, err = loadConfig(env(vars))
+	if err != nil || string(cfg.oidc.PreviousSessionKey) != "fedcba9876543210fedcba9876543210" {
+		t.Errorf("previous key = %q, %v", cfg.oidc.PreviousSessionKey, err)
 	}
 }
 
@@ -314,6 +347,10 @@ func TestLoadConfigOIDCValues(t *testing.T) {
 		{"VB_OFFICE32_SESSION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\n", true},
 		{"VB_OFFICE32_SESSION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZQ==", false},
 		{"VB_OFFICE32_SESSION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY", false},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "", true},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=", true},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZQ==", false},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "not base64", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
@@ -343,6 +380,16 @@ func TestRunWithMedia(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	addr, errc := start(t, ctx, livekitEnv())
+
+	res, err := http.Get("http://" + addr + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self' ws://localhost:7880 http://localhost:7880;") ||
+		!strings.Contains(csp, "form-action 'self';") {
+		t.Errorf("Content-Security-Policy = %q, want LiveKit in connect-src", csp)
+	}
 
 	conn, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws?name=ana", nil)
 	if err != nil {

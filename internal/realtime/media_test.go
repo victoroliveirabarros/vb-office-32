@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -22,6 +24,22 @@ import (
 type fakeIssuer struct {
 	ttl time.Duration
 	n   atomic.Int64
+
+	mu      sync.Mutex
+	removed []string
+}
+
+func (f *fakeIssuer) Remove(_ context.Context, room, identity string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = append(f.removed, room+"/"+identity)
+	return nil
+}
+
+func (f *fakeIssuer) removals() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.removed)
 }
 
 func (f *fakeIssuer) Issue(identity, name, room string, now time.Time) (media.Grant, error) {
@@ -214,4 +232,119 @@ func TestNoMediaWithoutIssuer(t *testing.T) {
 	if slices.Contains(seen, typeMedia) || slices.Contains(seen, typeNearby) {
 		t.Errorf("messages = %v, want no media or nearby", seen)
 	}
+}
+
+// runRoom runs a room with fake media inside a synctest bubble and stops it
+// when the test ends.
+func runRoom(t *testing.T, mi *fakeIssuer) (*Room, context.CancelFunc) {
+	t.Helper()
+	m, err := tilemap.LoadFile("testdata/small.tmj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room := NewRoom(DefaultSpace, "small", world.NewSpace(m), mi, slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error)
+	go func() { done <- room.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("run: %v", err)
+		}
+	})
+	return room, cancel
+}
+
+func joinAs(t *testing.T, room *Room, name string) *Session {
+	t.Helper()
+	s := newSession(auth.Identity{ID: "guest:" + strings.ToLower(name), Name: name}, nil, room, slog.New(slog.DiscardHandler))
+	if err := room.join(t.Context(), s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestMediaRemovalAfterGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		room, _ := runRoom(t, mi)
+		room.leave(joinAs(t, room, "Ana"))
+
+		time.Sleep(removeGrace - time.Nanosecond)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Fatalf("removed %v before the grace period ended", got)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if got := mi.removals(); !slices.Equal(got, []string{"office/guest:ana"}) {
+			t.Fatalf("removed %v, want office/guest:ana", got)
+		}
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 1 {
+			t.Errorf("removed %v, want a single removal", got)
+		}
+	})
+}
+
+func TestMediaRemovalCanceledByRejoin(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		room, _ := runRoom(t, mi)
+		room.leave(joinAs(t, room, "Ana"))
+		time.Sleep(removeGrace - time.Second)
+		ana := joinAs(t, room, "Ana")
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Fatalf("removed %v after a rejoin within the grace period", got)
+		}
+
+		// A new leave starts a new grace period.
+		room.leave(ana)
+		time.Sleep(removeGrace - time.Nanosecond)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Fatalf("removed %v before the second grace period ended", got)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if got := mi.removals(); !slices.Equal(got, []string{"office/guest:ana"}) {
+			t.Errorf("removed %v, want office/guest:ana", got)
+		}
+	})
+}
+
+func TestMediaNotRemovedWhenReplaced(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		room, _ := runRoom(t, mi)
+		old := joinAs(t, room, "Ana")
+		joinAs(t, room, "Ana")
+		room.leave(old)
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Errorf("removed %v while the identity is still connected", got)
+		}
+	})
+}
+
+func TestMediaNotRemovedOnShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mi := &fakeIssuer{ttl: time.Hour}
+		room, stop := runRoom(t, mi)
+		room.leave(joinAs(t, room, "Ana"))
+		stop()
+
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := mi.removals(); len(got) != 0 {
+			t.Errorf("removed %v after shutdown", got)
+		}
+	})
 }
