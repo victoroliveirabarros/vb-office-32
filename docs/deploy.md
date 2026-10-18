@@ -81,8 +81,23 @@ Notes:
   checked by the email domain alone; make sure the provider only issues
   verified emails for domains it controls.
 - Sessions last 12 hours. Removing a domain from the list revokes its
-  sessions on their next request; rotating `VB_OFFICE32_SESSION_KEY` logs
-  everyone out.
+  sessions on their next request; replacing `VB_OFFICE32_SESSION_KEY`
+  without the rotation below logs everyone out.
+
+### Rotating the session key
+
+`VB_OFFICE32_SESSION_KEY_PREVIOUS` (optional, secret, same format as the
+key) keeps cookies signed with the old key valid for reading, while every
+new cookie is signed with the current key.
+
+1. Set `VB_OFFICE32_SESSION_KEY_PREVIOUS` to the current key.
+2. Set `VB_OFFICE32_SESSION_KEY` to a new one (`openssl rand -base64 32`)
+   and deploy. Nobody is logged out, and logins in progress finish.
+3. After 12 hours (the session lifetime) every cookie signed with the old
+   key has expired: remove `VB_OFFICE32_SESSION_KEY_PREVIOUS` and deploy.
+
+To log everyone out instead (a leaked key), replace the key without setting
+the previous one.
 
 ## Audio and video (optional)
 
@@ -96,9 +111,21 @@ vb-office-32 at it with:
 | `VB_OFFICE32_LIVEKIT_API_KEY` | the key configured in LiveKit | no |
 | `VB_OFFICE32_LIVEKIT_API_SECRET` | the matching secret | yes |
 
-Set all three or none. vb-office-32 never calls LiveKit: it only signs
-tokens, so it needs no egress to it, but the browser does. Deliver the
-secret like the other secrets above.
+Set all three or none. Besides signing tokens, vb-office-32 calls the
+LiveKit room service (`RemoveParticipant`) at the same host over `http(s)`
+30 seconds after a player's WebSocket closes for good, so the pod needs
+egress to that URL as well as the browser. A failed call is logged as a
+warning and retried once. Deliver the secret like the other secrets above.
+
+## Security headers
+
+All responses carry CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+`Permissions-Policy` and `Cross-Origin-Opener-Policy` (see the
+[README](../README.md#security-headers)); the CSP already allows the LiveKit
+URL and the OIDC issuer from the configuration. HSTS
+(`max-age=31536000`) is sent only when `VB_OFFICE32_PUBLIC_URL` is https.
+Proxies in front must not strip or replace these headers, and a page served
+from another host needs that host in the CSP, which is not configurable.
 
 ## Port and probes
 
@@ -122,7 +149,9 @@ Restarts forget last positions; players respawn at the spawn points.
 
 On SIGTERM the server:
 
-1. turns `/readyz` to 503 and refuses new `/ws` connections with 503;
+1. turns `/readyz` to 503 and refuses new `/ws` connections with 503
+   (pending LiveKit removals are dropped: clients reconnect to the next
+   process and keep their call);
 2. closes every session with WebSocket close 1001 `"server restarting"` and
    waits up to 5 s for the close handshakes, keeping the listener open;
 3. stops the HTTP server and exits, 10 s at most after the signal.

@@ -41,9 +41,33 @@ used to connect again after a drop.
 Who hears whom is decided by the client, which subscribes only to players
 in its `nearby` set. Anyone holding a token can technically subscribe to
 anyone in the room, which matches an open-plan office; private rooms come
-with zones as separate LiveKit rooms. A player who closes the game keeps
-its LiveKit connection until it leaves, since LiveKit renews tokens on its
-own; server-side removal on leave is in the backlog.
+with zones as separate LiveKit rooms.
+
+## Removal on leave
+
+LiveKit renews the token of a connected participant by itself, so closing
+the game, an expired session (4002) or a removed domain would not end the
+call of a modified client. When a player's WebSocket closes, vb-office-32
+waits 30 seconds and, if the same identity has not connected again, calls
+`POST <LiveKit URL over http(s)>/twirp/livekit.RoomService/RemoveParticipant`
+with a one-minute admin token (`roomAdmin` for that room only, no
+`roomJoin`). A participant that is already gone (404 `not_found`) counts as
+removed; network errors and 5xx are retried once and then logged as a
+warning, never with the token. A replaced session (4001) keeps its identity
+connected, so nothing is removed, and a server shutdown cancels pending
+removals because clients reconnect to the next process.
+
+The honest client disconnects by itself when its session ends; after a
+removal it waits for the next `media` message, which the server sends as
+soon as the WebSocket is back. A removed client still holds a token valid
+for up to 10 minutes (the last one we sent, or the one LiveKit renewed), so
+a modified client can join again within that window; the backlog has the
+follow-up.
+
+The room service is reached through the same TLS proxy as signaling, so
+vb-office-32 needs egress to the LiveKit URL. The page's CSP allows that URL
+in `connect-src` (`ws(s)://` for signaling and `http(s)://` for the SDK's
+connection checks).
 
 ## Network
 
@@ -202,7 +226,7 @@ docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
   livekit/livekit-server:v1.13 --dev --bind 0.0.0.0 --node-ip 127.0.0.1
 ```
 
-The token check against a real server runs with:
+The token and removal checks against a real server run with:
 
 ```sh
 make livekit &

@@ -6,14 +6,11 @@ Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisõ
 
 ## Depois da fase 2
 
-- `VB_OFFICE32_SESSION_KEY_PREVIOUS`: aceitar a chave anterior na validação para rotacionar sem derrubar sessões.
 - Revogação de sessão no servidor (hoje o cookie vale até expirar, salvo domínio removido da config).
 - `prompt=select_account` no login, para trocar de conta Google sem sair do provedor.
-- CSP e demais headers de segurança nas páginas.
 - Logout RP-initiated (`end_session_endpoint`) quando o provedor suportar.
 - Job no CI com `docker buildx build --platform linux/amd64,linux/arm64`.
 - `client_secret_post` para provedores que não aceitem `client_secret_basic` (hoje fixo em Basic).
-- M6 — DNS rebinding no proxy WS do Vite em dev: requisição com `Host`/`Origin` = `evil.com:5173` recebe 101 no `/ws` (o proxy preserva o Host e o check de Origin compara Origin com Host). Em `AUTH=oidc` o upgrade dá 401; em `guest` qualquer um já entra. Só dev; corrigir com `server.allowedHosts` no Vite ou checagem de Host no proxy.
 
 ## Fase 3a — servidor de mídia (feito)
 
@@ -25,10 +22,17 @@ Escopo e decisões em [`phase3.md`](phase3.md). Envs `VB_OFFICE32_LIVEKIT_URL`, 
 
 ## Depois da fase 3a
 
-- `RemoveParticipant` (Twirp, stdlib) no leave, com carência de ~30 s para reconexão: revogação real de quem perde o WS, já que o LiveKit renova o token da sessão conectada indefinidamente.
 - Permissões de trilha do publicador (`setTrackSubscriptionPermissions`) como enforcement barato de quem assina quem (fase 5, junto com zonas).
-- CSP `connect-src` incluindo a URL do LiveKit (junto com os demais headers de segurança).
 - Métricas Prometheus em fase posterior (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack, logins negados por motivo, mídia emitida).
+
+## Hardening de segurança (feito)
+
+Escopo em [`security-hardening.md`](security-hardening.md): `RemoveParticipant` 30 s após o WS fechar (carência cancelada por reconexão; nada removido no shutdown), CSP e headers em todas as respostas (HSTS só com `PUBLIC_URL` https; `<style>` do `index.html` movido para `web/src/style.css`), `VB_OFFICE32_SESSION_KEY_PREVIOUS` e checagem de `Host` no upgrade `/ws` do Vite (M6; `allowedHosts` sozinho não cobre o proxy WS no Vite 8). Desvio: o cliente passou a esperar o próximo `media` depois de `removed` (antes parava de vez), senão quem ficasse mais de 30 s sem WS perderia a mídia até recarregar a página.
+
+## Depois do hardening
+
+- Revogação de mídia persistente: removido, um cliente modificado entra de novo no LiveKit com o último token que tem (o nosso, até 10 min, ou o renovado pelo próprio LiveKit) e volta a ser renovado indefinidamente. Fechar com reconciliação periódica (`ListParticipants` no check de mídia de 1 min, removendo identidades fora de `members` e fora da carência).
+- Corrida pequena: a remoção já em voo quando a identidade reconecta derruba a mídia recém-reconectada; o cliente honesto volta no próximo `media` (até ~5 min).
 
 ## Descartado
 

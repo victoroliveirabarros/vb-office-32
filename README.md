@@ -39,7 +39,8 @@ and no `$`.
 | `VB_OFFICE32_OIDC_CLIENT_ID`     | with oidc | —                             | no     | OAuth client ID. |
 | `VB_OFFICE32_OIDC_CLIENT_SECRET` | with oidc | —                             | yes    | OAuth client secret, sent with HTTP Basic (`client_secret_basic`). |
 | `VB_OFFICE32_ALLOWED_DOMAINS`    | with oidc | —                             | no     | Comma-separated email domains allowed in, e.g. `example.com,example.org`. |
-| `VB_OFFICE32_SESSION_KEY`        | with oidc | —                             | yes    | Base64 of at least 32 random bytes (`openssl rand -base64 32`). Signs the session and login cookies; changing it logs everyone out. |
+| `VB_OFFICE32_SESSION_KEY`        | with oidc | —                             | yes    | Base64 of at least 32 random bytes (`openssl rand -base64 32`). Signs the session and login cookies; changing it alone logs everyone out. |
+| `VB_OFFICE32_SESSION_KEY_PREVIOUS` | no      | —                             | yes    | The key before a rotation, same format. Cookies it signed are still accepted; new ones always use `VB_OFFICE32_SESSION_KEY`. See [rotation](docs/deploy.md#rotating-the-session-key). |
 | `VB_OFFICE32_LIVEKIT_URL`        | for media | —                             | no     | LiveKit URL the browser connects to, `wss://host[:port]` without path; `ws` only for `localhost`/`127.0.0.1`. |
 | `VB_OFFICE32_LIVEKIT_API_KEY`    | for media | —                             | no     | LiveKit API key (it goes in every token, so it is not secret). |
 | `VB_OFFICE32_LIVEKIT_API_SECRET` | for media | —                             | yes    | LiveKit API secret; under 32 characters only logs a warning, for the development `secret`. |
@@ -55,7 +56,10 @@ With the LiveKit variables set, each player gets a LiveKit token right after
 `welcome` (`media`) and the set of players within earshot (`nearby`): a pair
 becomes near at 4 tiles and stops at more than 5. Tokens last 10 minutes and
 are reissued about every 5 (the server checks once a minute); the server
-never logs them. Network, cost and a
+never logs them. A player whose WebSocket stays closed for 30 seconds is
+removed from the LiveKit room through its API, since LiveKit would otherwise
+keep renewing that connection; reconnecting within the 30 seconds keeps the
+call. Network, cost and a
 minimal LiveKit configuration are in [`docs/livekit.md`](docs/livekit.md).
 
 In the browser the LiveKit SDK loads only when the first `media` arrives.
@@ -111,6 +115,25 @@ Its defaults match `.env.example`: issuer `http://localhost:9000`, client
 Change them with flags (`go run ./cmd/devidp -h`), `DEVIDP_FLAGS` or the
 `DEVIDP_*` variables, keeping the server's variables in step.
 
+## Security headers
+
+Every response carries a `Content-Security-Policy` that allows scripts,
+styles and fonts from the page's own origin only (no inline code), images
+and media also from `data:`/`blob:`, connections to the page's origin and to
+the LiveKit URL (`ws(s)://` and `http(s)://`), forms and login redirects to
+the page's origin and the OIDC issuer, and no framing. They also get
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`Permissions-Policy` (camera and microphone for the page only, no
+geolocation or screen capture) and `Cross-Origin-Opener-Policy:
+same-origin`; `Strict-Transport-Security: max-age=31536000` is added when
+`VB_OFFICE32_PUBLIC_URL` is https.
+
+The Vite dev server does not send these headers: check CSP changes against
+the build served by the Go server (`make web-build` and `make run`, then
+open http://localhost:8080). In dev, Vite answers only for `localhost` and
+`127.0.0.1` and refuses `/ws` upgrades for any other `Host`, which blocks
+DNS rebinding through its proxy.
+
 ## Endpoints
 
 | Path       | Purpose |
@@ -135,7 +158,7 @@ make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
 
-# token check against a running LiveKit (make livekit)
+# token and participant removal checks against a running LiveKit (make livekit)
 VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media
 ```
 
