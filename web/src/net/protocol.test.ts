@@ -43,6 +43,48 @@ describe('parseServerMessage', () => {
     expect(parseServerMessage('{"t":"nearby","d":{"ids":["a",2]}}')).toBeNull()
   })
 
+  it('parses chat messages, keeping only known fields', () => {
+    const everyone = { id: 'k1', at: 1767269400000, from: 'guest:ana', fromName: 'Ana', scope: 'everyone', text: '<b>oi</b>' }
+    expect(parseServerMessage(JSON.stringify({ t: 'chat', d: { ...everyone, extra: 1 } }))).toEqual({ t: 'chat', d: everyone })
+    const echo = { ...everyone, scope: 'direct', to: 'guest:bia', cid: 'c1' }
+    expect(parseServerMessage(JSON.stringify({ t: 'chat', d: echo }))).toEqual({ t: 'chat', d: echo })
+    expect(parseServerMessage(JSON.stringify({ t: 'chat', d: { ...everyone, to: null, cid: null } }))).toEqual({ t: 'chat', d: everyone })
+  })
+
+  it('rejects malformed chat messages', () => {
+    const ok = { id: 'k1', at: 1, from: 'a', fromName: 'A', scope: 'nearby', text: 'x' }
+    for (const bad of [
+      { ...ok, id: '' },
+      { ...ok, at: 1.5 },
+      { ...ok, scope: 'all' },
+      { ...ok, text: 1 },
+      { ...ok, fromName: undefined },
+      { ...ok, to: 'b' },
+      { ...ok, scope: 'direct' },
+      { ...ok, cid: 3 },
+    ]) {
+      expect(parseServerMessage(JSON.stringify({ t: 'chat', d: bad }))).toBeNull()
+    }
+  })
+
+  it('parses chat history, skipping bad entries', () => {
+    const ok = { id: 'k1', at: 1, from: 'a', fromName: 'A', scope: 'everyone', text: 'x' }
+    expect(parseServerMessage(JSON.stringify({ t: 'chatHistory', d: { messages: [ok, { id: 2 }] } }))).toEqual({
+      t: 'chatHistory',
+      d: { messages: [ok] },
+    })
+    expect(parseServerMessage('{"t":"chatHistory","d":{"messages":[]}}')).toEqual({ t: 'chatHistory', d: { messages: [] } })
+    expect(parseServerMessage('{"t":"chatHistory","d":{}}')).toBeNull()
+  })
+
+  it('parses chat errors, mapping unknown reasons to invalid', () => {
+    for (const reason of ['rate_limited', 'too_long', 'empty', 'offline', 'invalid']) {
+      expect(parseServerMessage(JSON.stringify({ t: 'chatError', d: { cid: 'c1', reason } }))).toEqual({ t: 'chatError', d: { cid: 'c1', reason } })
+    }
+    expect(parseServerMessage('{"t":"chatError","d":{"cid":"c1","reason":"new"}}')).toEqual({ t: 'chatError', d: { cid: 'c1', reason: 'invalid' } })
+    expect(parseServerMessage('{"t":"chatError","d":{"reason":"empty"}}')).toBeNull()
+  })
+
   it('rejects malformed messages', () => {
     expect(parseServerMessage('not json')).toBeNull()
     expect(parseServerMessage('{"t":"nope","d":{}}')).toBeNull()
