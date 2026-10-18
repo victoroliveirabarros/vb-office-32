@@ -172,8 +172,13 @@ func validWSURL(u *url.URL) bool {
 
 // validBaseURL accepts https, or http on loopback for development.
 func validBaseURL(u *url.URL) bool {
-	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
+	if u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
 		return false
+	}
+	if u.Port() != "" || strings.HasSuffix(u.Host, ":") {
+		if p, err := strconv.Atoi(u.Port()); err != nil || p < 1 || p > 65535 {
+			return false
+		}
 	}
 	switch u.Scheme {
 	case "https":

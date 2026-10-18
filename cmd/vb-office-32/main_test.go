@@ -297,9 +297,16 @@ func TestLoadConfigOIDCValues(t *testing.T) {
 		{"VB_OFFICE32_PUBLIC_URL", "office.example", false},
 		{"VB_OFFICE32_PUBLIC_URL", "https://", false},
 		{"VB_OFFICE32_PUBLIC_URL", "ws://localhost:5173", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://:443", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:0", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:65536", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:65535", true},
 		{"VB_OFFICE32_OIDC_ISSUER", "https://cognito-idp.us-east-1.amazonaws.com/pool", true},
 		{"VB_OFFICE32_OIDC_ISSUER", "http://issuer.example", false},
 		{"VB_OFFICE32_OIDC_ISSUER", "https://issuer.example?tenant=1", false},
+		{"VB_OFFICE32_OIDC_ISSUER", "https://:443/pool", false},
+		{"VB_OFFICE32_OIDC_ISSUER", "https://issuer.example:99999", false},
 		{"VB_OFFICE32_ALLOWED_DOMAINS", "example.com,example.org", true},
 		{"VB_OFFICE32_ALLOWED_DOMAINS", "@example.com", false},
 		{"VB_OFFICE32_ALLOWED_DOMAINS", "example", false},
@@ -425,6 +432,10 @@ func TestLoadConfigLiveKit(t *testing.T) {
 		{"wss://media.example?x=1", ""},
 		{"wss://user:s3cr3t@media.example", ""},
 		{"media.example", ""},
+		{"wss://:443", ""},
+		{"wss://media.example:99999", ""},
+		{"wss://media.example:0", ""},
+		{"wss://media.example:443", "wss://media.example:443"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.value, func(t *testing.T) {
