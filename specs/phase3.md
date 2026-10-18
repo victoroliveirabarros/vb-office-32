@@ -134,6 +134,7 @@ Versões conferidas em 2026-10-18: livekit-server v1.13.10 (imagem `livekit/live
 
 - SDK via `await import('livekit-client')` só ao receber `media` (chunk separado).
 - `new Room({ adaptiveStream: true, dynacast: true, webAudioMix: true, publishDefaults: { simulcast: true, videoSimulcastLayers: [VideoPresets.h90], dtx: true, red: true }, videoCaptureDefaults: { resolution: VideoPresets.h180.resolution } })`; `room.connect(url, token, { autoSubscribe: false })`.
+  - Áudio com `audioPreset: AudioPresets.speech` (24 kbit/s) mantendo RED: ~45 kbit/s falando contra 88 do preset padrão `music`; sem RED seriam ~22, mas 10% de perda até o assinante viram 9% de áudio ocultado contra 1% com RED (medições em `docs/livekit.md`).
   - Implementado com captura `h360` e `videoEncoding: VideoPresets.h180.encoding`: o SDK (2.23) só gera simulcast com lado maior ≥ 480 px, então captura 180p publicava uma camada só. Resultado: camadas 160×90 (90 kbit/s) e 640×360 limitada a 160 kbit/s; tiles de 160×90 puxam a de 90p e o dynacast pausa a de cima.
 - Reconciliação de assinaturas por snapshot (`remoteParticipants` × `trackPublications`) em: `nearby`, `TrackPublished`, `ParticipantConnected`, `Connected`/`Reconnected`. `setSubscribed(bool)`.
 - **Vídeo assinado só dos K=8 mais próximos**; áudio sem limite. Função pura.

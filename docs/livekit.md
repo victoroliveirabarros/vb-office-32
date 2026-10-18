@@ -77,6 +77,13 @@ LiveKit needs a stable public IP that browsers reach directly:
 - **Do not log query strings at the proxy.** The SDK sends the access token
   in the query (`/rtc?access_token=…`), so access logs that keep the full
   URL store valid tokens. Log the path only.
+- **Browsers may print the token.** When the signaling WebSocket fails,
+  Chrome writes the full URL, token included, in the console (`WebSocket
+  connection to 'wss://…/rtc/v1?access_token=…' failed`). The SDK redacts
+  its own logs, but browsers cannot send headers on a WebSocket, so the
+  token has to be in the URL and the browser's message is out of the app's
+  control. Console captures and error reports may therefore hold a token;
+  the 10-minute TTL keeps that window short.
 - **TURN/TLS on 443** helps clients behind strict firewalls. It needs its
   own host name and certificate (`turn.domain`, `turn.tls_port`). The media
   goes through the server either way, so it adds little egress; the cost is
@@ -124,7 +131,11 @@ with the size of the office. The client keeps it down by:
 
 - subscribing only to players in `nearby`;
 - leaving the camera off by default and subscribing to the cameras of the
-  8 closest players only;
+  8 closest players only, keeping a camera until someone else is more than
+  a tile closer so the 8th place does not flip back and forth;
+- publishing audio with the `speech` preset (Opus capped at 24 kbit/s),
+  DTX (almost nothing during silence) and RED, which repeats the previous
+  frame in each packet so a lost packet costs no audio;
 - sending small video with simulcast: the camera opens at 360p (the SDK
   only simulcasts captures at least 480 px wide) with a 90p layer, which is
   what the 160x90 tiles pull, and a top layer capped at the 180p bitrate
@@ -132,8 +143,24 @@ with the size of the office. The client keeps it down by:
 - adaptive stream (no video for hidden or tiny tiles) and dynacast (the
   publisher stops encoding layers nobody watches).
 
-Audio is roughly 30 to 50 kbit/s per subscribed speaker; small video adds
-about 90 kbit/s per subscribed camera (160 kbit/s at most).
+Measured per audio stream on LiveKit v1.13 with Chrome (RTP payload; RTP
+headers add about 5 kbit/s and IP/UDP about 11 more at 50 packets/s):
+
+| Signal | `music` + RED (before) | `speech` + RED (used) | `speech`, no RED |
+|---|---|---|---|
+| Continuous speech-like audio | 88 kbit/s | 45 kbit/s | 22 kbit/s |
+| Chrome's fake device (beeps) | 77 kbit/s | 40 kbit/s | 19 kbit/s |
+| Talking half of the time | — | 25 kbit/s | 12 kbit/s |
+| Audio concealed at 3% loss | — | 0% | 3.4% |
+| Audio concealed at 10% loss | — | 1.2% | 9.3% |
+
+Loss was applied between LiveKit and the subscribers. Without RED nothing
+covers it: Opus in-band FEC only kicks in when the publisher sees loss, and
+the publisher's own link was clean. RED only doubles the bitrate while
+someone speaks (DTX sends almost nothing in silence), so it stays on.
+
+Small video adds about 90 kbit/s per subscribed camera (160 kbit/s at
+most).
 
 ## Metrics to watch
 
