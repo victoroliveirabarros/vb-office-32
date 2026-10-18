@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>vb-office-32</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f27; font-family: system-ui, sans-serif; }
+      #game { position: fixed; inset: 0; }
+      .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(10, 11, 16, 0.85); z-index: 10; }
+      .overlay[hidden] { display: none; }
+      #join-form { display: grid; gap: 8px; padding: 24px; background: #2a2d38; border-radius: 8px; color: #eee; min-width: 260px; }
+      #join-form input, #join-form button { font: inherit; padding: 8px; border-radius: 4px; border: 1px solid #555; }
+      #join-form button { background: #4f6d99; color: #fff; border: 0; cursor: pointer; }
+      #join-error { color: #ff8a8a; font-size: 13px; margin: 0; }
+      .badge { position: fixed; top: 8px; padding: 4px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); color: #fff; font: 12px monospace; z-index: 5; }
+      .badge[hidden] { display: none; }
+      #status { left: 50%; transform: translateX(-50%); }
+      #latency { right: 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="status" class="badge" hidden></div>
+    <div id="latency" class="badge" hidden></div>
+    <div id="join" class="overlay" hidden>
+      <form id="join-form">
+        <label for="join-name">Seu nome</label>
+        <input id="join-name" maxlength="24" autocomplete="nickname" required />
+        <p id="join-error" hidden>Use 1–24 caracteres: letras, números, espaço, _ ou -.</p>
+        <button type="submit">Entrar</button>
+      </form>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
