@@ -22,6 +22,35 @@
       <span id="media-note" hidden></span>
     </div>
     <div id="media-audio" hidden></div>
+    <aside id="chat" class="chat" aria-label="Chat" hidden>
+      <button id="chat-toggle" class="chat-toggle" type="button" aria-expanded="false" aria-controls="chat-panel">
+        <span>Chat</span><span id="chat-toggle-badge" class="chat-badge" aria-hidden="true" hidden></span>
+      </button>
+      <section id="chat-panel" class="chat-panel" hidden>
+        <div class="chat-header">
+          <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Conversas"></div>
+          <button id="chat-close" class="chat-close" type="button" aria-label="Fechar chat" title="Fechar chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <button id="chat-people-toggle" class="chat-people-toggle" type="button" aria-expanded="false" aria-controls="chat-people">Presentes</button>
+        <div id="chat-people" class="chat-people" hidden>
+          <ul id="chat-roster" class="chat-roster" aria-label="Presentes"></ul>
+        </div>
+        <div id="chat-tabpanel" class="chat-tabpanel" role="tabpanel">
+          <p id="chat-notice" class="chat-notice"></p>
+          <div id="chat-log" class="chat-log" role="log" aria-label="Mensagens" aria-busy="false" tabindex="0"></div>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" class="chat-input" rows="2" dir="auto" aria-label="Mensagem" aria-describedby="chat-status" placeholder="Mensagem (Enter envia, Shift+Enter quebra linha)"></textarea>
+          <div class="chat-meta">
+            <span id="chat-status" class="chat-status" role="status"></span>
+            <span id="chat-count" class="chat-count" aria-hidden="true">0/500</span>
+            <button id="chat-send" class="button chat-send" type="submit">Enviar</button>
+          </div>
+        </form>
+      </section>
+    </aside>
     <div id="login" class="overlay" hidden>
       <div class="panel">
         <p>vb-office-32</p>

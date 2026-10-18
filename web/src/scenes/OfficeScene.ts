@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import type { TypingGate } from '../chat/keys'
 import { Avatar } from '../entities/Avatar'
 import { Grid } from '../game/grid'
 import { Predictor, correctionFor } from '../game/prediction'
@@ -16,7 +17,7 @@ export type SpeakingSource = {
   onSpeaking(fn: (ids: ReadonlySet<string>) => void): () => void
 }
 
-export class OfficeScene extends Phaser.Scene {
+export class OfficeScene extends Phaser.Scene implements TypingGate {
   private grid!: Grid
   private keys!: DirKeys
   private readonly avatars = new Map<string, Avatar>()
@@ -25,6 +26,7 @@ export class OfficeScene extends Phaser.Scene {
   private stepMs = DEFAULT_STEP_MS
   private nextStepAt = 0
   private speaking: ReadonlySet<string> = new Set()
+  private typing = false
 
   constructor(
     private readonly connection: Connection,
@@ -49,6 +51,7 @@ export class OfficeScene extends Phaser.Scene {
     this.scale.on(Phaser.Scale.Events.RESIZE, this.fitCamera, this)
 
     this.keys = this.createKeys()
+    this.applyTyping()
 
     const offMessage = this.connection.onMessage((msg) => this.handle(msg))
     const offStatus = this.connection.onStatus((status) => {
@@ -71,7 +74,17 @@ export class OfficeScene extends Phaser.Scene {
     this.connection.connect()
   }
 
+  // addKey makes Phaser call preventDefault on window keydowns even with the
+  // plugin disabled, so typing also turns the global capture off; resetKeys
+  // drops keys held when the chat took focus, whose keyup it will swallow.
+  setTyping(on: boolean): void {
+    if (this.typing === on) return
+    this.typing = on
+    this.applyTyping()
+  }
+
   update(time: number): void {
+    if (this.typing) return
     if (!this.predictor || !this.connection.isOpen || time < this.nextStepAt) return
     const dir = this.heldDir()
     if (!dir) return
@@ -168,6 +181,15 @@ export class OfficeScene extends Phaser.Scene {
     const { UP, DOWN, LEFT, RIGHT, W, A, S, D } = Phaser.Input.Keyboard.KeyCodes
     const add = (...codes: number[]) => codes.map((code) => keyboard.addKey(code))
     return { up: add(UP, W), down: add(DOWN, S), left: add(LEFT, A), right: add(RIGHT, D) }
+  }
+
+  private applyTyping(): void {
+    const keyboard = this.input?.keyboard
+    if (!keyboard) return
+    keyboard.enabled = !this.typing
+    if (this.typing) keyboard.disableGlobalCapture()
+    else keyboard.enableGlobalCapture()
+    keyboard.resetKeys()
   }
 
   private heldDir(): Dir | null {

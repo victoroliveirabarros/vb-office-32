@@ -11,6 +11,7 @@ import { BootScene } from './scenes/BootScene'
 import { OfficeScene } from './scenes/OfficeScene'
 import { createHud } from './ui/hud'
 import type { Hud } from './ui/hud'
+import { createChat } from './ui/chat'
 import { askName } from './ui/join'
 import { showLogin, showLogout } from './ui/login'
 import { createMediaView } from './ui/media'
@@ -40,6 +41,9 @@ function start(hud: Hud, connection: Connection): void {
     if (status === 'expired') location.assign('/')
   })
 
+  const office = new OfficeScene(connection, hud, media)
+  createChat(connection, office)
+
   new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
@@ -47,7 +51,7 @@ function start(hud: Hud, connection: Connection): void {
     pixelArt: true,
     roundPixels: true,
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-    scene: [new BootScene(hud), new OfficeScene(connection, hud, media)],
+    scene: [new BootScene(hud), office],
   })
 }
 
