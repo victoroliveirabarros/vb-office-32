@@ -498,6 +498,22 @@ describe('MediaClient', () => {
     expect(room().connects).toEqual(['t1'])
   })
 
+  it('reconnects with the next grant after a removal', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    room().listener.disconnected('removed')
+    expect(client.state).toBe('waiting')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(room().connects).toEqual(['t1'])
+
+    client.handle(media('t2'))
+    await vi.runAllTimersAsync()
+    expect(room().connects).toEqual(['t1', 't2'])
+    expect(client.state).toBe('connected')
+  })
+
   it('reports device failures and leaves the device off', async () => {
     const client = setup(false, (r) => (r.micError = new DeviceFailure('denied')))
     client.handle(welcome([]))

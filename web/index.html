@@ -4,40 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>vb-office-32</title>
-    <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f27; font-family: system-ui, sans-serif; }
-      #game { position: fixed; inset: 0; }
-      .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(10, 11, 16, 0.85); z-index: 10; }
-      .overlay[hidden] { display: none; }
-      #join-form { display: grid; gap: 8px; padding: 24px; background: #2a2d38; border-radius: 8px; color: #eee; min-width: 260px; }
-      #join-form input, #join-form button { font: inherit; padding: 8px; border-radius: 4px; border: 1px solid #555; }
-      #join-form button { background: #4f6d99; color: #fff; border: 0; cursor: pointer; }
-      #join-error { color: #ff8a8a; font-size: 13px; margin: 0; }
-      .panel { display: grid; gap: 12px; padding: 24px; background: #2a2d38; border-radius: 8px; color: #eee; min-width: 260px; text-align: center; }
-      .panel p { margin: 0; }
-      .button { display: block; font: inherit; padding: 8px; border-radius: 4px; background: #4f6d99; color: #fff; text-decoration: none; border: 0; cursor: pointer; }
-      #logout { position: fixed; top: 8px; left: 8px; padding: 4px 8px; font: 12px monospace; z-index: 5; }
-      #logout[hidden] { display: none; }
-      .badge { position: fixed; top: 8px; padding: 4px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); color: #fff; font: 12px monospace; z-index: 5; }
-      .badge[hidden] { display: none; }
-      #status { left: 50%; transform: translateX(-50%); }
-      #latency { right: 8px; }
-      #media-tiles { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; max-width: calc(100vw - 32px); overflow-x: auto; z-index: 4; }
-      #media-tiles[hidden], #media-bar[hidden], #media-bar [hidden] { display: none; }
-      .tile { position: relative; flex: none; width: 160px; height: 90px; border-radius: 8px; overflow: hidden; background: #2a2d38; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
-      .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .tile.self video { transform: scaleX(-1); }
-      .tile span { position: absolute; left: 4px; bottom: 4px; padding: 1px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); color: #fff; font: 11px system-ui, sans-serif; }
-      #media-bar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 28px; background: rgba(0, 0, 0, 0.6); color: #fff; font: 13px system-ui, sans-serif; z-index: 5; max-width: calc(100vw - 32px); }
-      .media-button { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: #3a3e4c; color: #fff; cursor: pointer; }
-      .media-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-      .media-button[aria-pressed="false"] { background: #a63d40; }
-      .media-button[aria-pressed="true"] .slash { display: none; }
-      .media-button.error::after { content: "!"; position: absolute; top: -2px; right: -2px; width: 14px; height: 14px; border-radius: 50%; background: #f2b84b; color: #1d1f27; font: bold 10px/14px system-ui, sans-serif; }
-      .media-button:disabled { opacity: 0.6; cursor: default; }
-      #media-unlock { padding: 8px 12px; border-radius: 20px; }
-      #media-note { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    </style>
   </head>
   <body>
     <div id="game"></div>

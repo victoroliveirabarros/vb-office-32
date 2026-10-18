@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import './style.css'
 import { MediaClient } from './media/client'
 import type { MediaRoom, RoomListener } from './media/client'
 import { storagePrefs } from './media/prefs'
