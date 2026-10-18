@@ -26,6 +26,12 @@ type config struct {
 	logLevel       slog.Level
 	auth           string
 	oidc           auth.OIDCConfig
+	livekit        livekitConfig
+}
+
+// livekitConfig is zero when media is off.
+type livekitConfig struct {
+	url, apiKey, apiSecret string
 }
 
 // loadConfig reads VB_OFFICE32_* variables. Errors name the variable but
@@ -62,6 +68,8 @@ func loadConfig(getenv func(string) string) (config, error) {
 	default:
 		errs = append(errs, errors.New("VB_OFFICE32_AUTH: must be oidc or guest"))
 	}
+	cfg.livekit, err = loadLiveKit(getenv)
+	errs = append(errs, err)
 	if err := errors.Join(errs...); err != nil {
 		return config{}, err
 	}
@@ -115,6 +123,51 @@ func loadOIDC(getenv func(string) string) (auth.OIDCConfig, error) {
 		c.SessionKey = key
 	}
 	return c, errors.Join(errs...)
+}
+
+// loadLiveKit requires all three variables or none.
+func loadLiveKit(getenv func(string) string) (livekitConfig, error) {
+	keys := [...]string{"VB_OFFICE32_LIVEKIT_URL", "VB_OFFICE32_LIVEKIT_API_KEY", "VB_OFFICE32_LIVEKIT_API_SECRET"}
+	var vals [len(keys)]string
+	set := false
+	for i, k := range keys {
+		vals[i] = strings.TrimSpace(getenv(k))
+		set = set || vals[i] != ""
+	}
+	if !set {
+		return livekitConfig{}, nil
+	}
+	var errs []error
+	for i, k := range keys {
+		if vals[i] == "" {
+			errs = append(errs, errors.New(k+": required when any VB_OFFICE32_LIVEKIT_* variable is set"))
+		}
+	}
+	c := livekitConfig{apiKey: vals[1], apiSecret: vals[2]}
+	if vals[0] != "" {
+		if u, err := url.Parse(vals[0]); err != nil || !validWSURL(u) {
+			errs = append(errs, errors.New("VB_OFFICE32_LIVEKIT_URL: must be wss://host[:port] without path or query; ws only for localhost or 127.0.0.1"))
+		} else {
+			c.url = u.Scheme + "://" + u.Host
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return livekitConfig{}, err
+	}
+	return c, nil
+}
+
+func validWSURL(u *url.URL) bool {
+	b := *u
+	switch u.Scheme {
+	case "wss":
+		b.Scheme = "https"
+	case "ws":
+		b.Scheme = "http"
+	default:
+		return false
+	}
+	return validBaseURL(&b) && (u.Path == "" || u.Path == "/")
 }
 
 // validBaseURL accepts https, or http on loopback for development.

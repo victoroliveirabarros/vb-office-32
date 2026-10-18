@@ -20,6 +20,7 @@ import (
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
 	"github.com/victoroliveirabarros/vb-office-32/internal/httpapi"
+	"github.com/victoroliveirabarros/vb-office-32/internal/media"
 	"github.com/victoroliveirabarros/vb-office-32/internal/realtime"
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
@@ -28,6 +29,7 @@ import (
 const (
 	mapID           = "office"
 	shutdownTimeout = 10 * time.Second
+	minSecretLen    = 32
 )
 
 func main() {
@@ -65,8 +67,16 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 		log.Warn("guest auth: anyone can join under any name; use only for development")
 	}
 
+	var mi realtime.MediaIssuer
+	if lk := cfg.livekit; lk.url != "" {
+		mi = media.NewIssuer(lk.url, lk.apiKey, lk.apiSecret)
+		if len(lk.apiSecret) < minSecretLen {
+			log.Warn("VB_OFFICE32_LIVEKIT_API_SECRET is shorter than 32 characters; use a long random secret outside development")
+		}
+	}
+
 	var ready atomic.Bool
-	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), log))
+	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), mi, log))
 	ws := realtime.NewHandler(hub, authn, cfg.allowedOrigins, cfg.maxSessions, log)
 	srv := httpapi.NewServer(httpapi.NewHandler(httpapi.Options{
 		WS:      ws,
@@ -81,7 +91,7 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions)
+	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions, "media", mi != nil)
 
 	// The hub outlives ctx so sessions are closed only after readiness has
 	// turned false, while the listener still answers /readyz with 503.

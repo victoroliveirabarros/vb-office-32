@@ -17,6 +17,8 @@ const (
 	typeLeft    = "left"
 	typeState   = "state"
 	typePong    = "pong"
+	typeMedia   = "media"
+	typeNearby  = "nearby"
 )
 
 var errInvalidMessage = errors.New("invalid message")
@@ -68,6 +70,17 @@ type welcomeMsg struct {
 
 type leftMsg struct {
 	ID string `json:"id"`
+}
+
+// mediaMsg carries the LiveKit connection; ExpiresAt is unix milliseconds.
+type mediaMsg struct {
+	URL       string `json:"url"`
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+type nearbyMsg struct {
+	IDs []string `json:"ids"`
 }
 
 func newPlayerMsg(p world.Player) playerMsg {

@@ -9,16 +9,28 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/media"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
-const shutdownTimeout = 5 * time.Second
+const (
+	shutdownTimeout = 5 * time.Second
+	mediaCheck      = time.Minute
+)
 
 var errRoomClosed = errors.New("room closed")
+
+// MediaIssuer grants access to the media server; a nil MediaIssuer turns
+// media off.
+type MediaIssuer interface {
+	Issue(identity, name, room string, now time.Time) (media.Grant, error)
+}
 
 type member struct {
 	sess *Session
 	ack  uint32
+	// renewAt is when the member gets a fresh media grant.
+	renewAt time.Time
 }
 
 type sessionInput struct {
@@ -32,7 +44,11 @@ type Room struct {
 	id    string
 	mapID string
 	space *world.Space
+	media MediaIssuer
 	log   *slog.Logger
+
+	// mediaCheck is how often grants due for renewal are reissued.
+	mediaCheck time.Duration
 
 	joins   chan *Session
 	leaves  chan *Session
@@ -41,17 +57,19 @@ type Room struct {
 	members map[string]*member
 }
 
-func NewRoom(id, mapID string, space *world.Space, log *slog.Logger) *Room {
+func NewRoom(id, mapID string, space *world.Space, mi MediaIssuer, log *slog.Logger) *Room {
 	return &Room{
-		id:      id,
-		mapID:   mapID,
-		space:   space,
-		log:     log.With("room", id),
-		joins:   make(chan *Session),
-		leaves:  make(chan *Session),
-		inputs:  make(chan sessionInput, 256),
-		done:    make(chan struct{}),
-		members: make(map[string]*member),
+		id:         id,
+		mapID:      mapID,
+		space:      space,
+		media:      mi,
+		log:        log.With("room", id),
+		mediaCheck: mediaCheck,
+		joins:      make(chan *Session),
+		leaves:     make(chan *Session),
+		inputs:     make(chan sessionInput, 256),
+		done:       make(chan struct{}),
+		members:    make(map[string]*member),
 	}
 }
 
@@ -59,6 +77,12 @@ func (r *Room) Run(ctx context.Context) error {
 	defer close(r.done)
 	ticker := time.NewTicker(world.TickInterval)
 	defer ticker.Stop()
+	var renew <-chan time.Time
+	if r.media != nil {
+		t := time.NewTicker(r.mediaCheck)
+		defer t.Stop()
+		renew = t.C
+	}
 
 	for {
 		select {
@@ -73,6 +97,8 @@ func (r *Room) Run(ctx context.Context) error {
 			r.handleInput(in)
 		case now := <-ticker.C:
 			r.tick(now)
+		case now := <-renew:
+			r.renewMedia(now)
 		}
 	}
 }
@@ -123,7 +149,8 @@ func (r *Room) handleJoin(s *Session) {
 		old.sess.close(statusReplaced, reasonReplaced)
 	}
 	self := r.space.Join(s.id, s.name)
-	r.members[s.id] = &member{sess: s}
+	m := &member{sess: s}
+	r.members[s.id] = m
 
 	players := r.space.Players()
 	msgs := make([]playerMsg, len(players))
@@ -143,6 +170,10 @@ func (r *Room) handleJoin(s *Session) {
 		return
 	}
 	s.send(welcome)
+	if r.media != nil {
+		r.sendMedia(m, time.Now())
+		r.sendNearby(s, r.space.Nearby(s.id))
+	}
 	r.log.Info("player joined", "id", s.id, "replaced", replaced)
 
 	if !replaced || old.sess.name != s.name {
@@ -171,10 +202,19 @@ func (r *Room) handleInput(in sessionInput) {
 
 func (r *Room) tick(now time.Time) {
 	d := r.space.Step(now)
-	if len(d.Moved) == 0 && len(d.Acks) == 0 {
-		return
+	if len(d.Moved) > 0 || len(d.Acks) > 0 {
+		r.sendState(d)
 	}
+	if r.media != nil {
+		for id, ids := range d.Nearby {
+			if m, ok := r.members[id]; ok {
+				r.sendNearby(m.sess, ids)
+			}
+		}
+	}
+}
 
+func (r *Room) sendState(d world.Delta) {
 	positions := make([]posMsg, len(d.Moved))
 	for i, p := range d.Moved {
 		positions[i] = posMsg{ID: p.ID, X: p.Pos.X, Y: p.Pos.Y, Dir: p.Dir}
@@ -193,6 +233,40 @@ func (r *Room) tick(now time.Time) {
 		}
 		m.sess.send(encodeState(d.Tick, m.ack, raw))
 	}
+}
+
+func (r *Room) renewMedia(now time.Time) {
+	for _, m := range r.members {
+		if !now.Before(m.renewAt) {
+			r.sendMedia(m, now)
+		}
+	}
+}
+
+// sendMedia issues a grant and schedules its renewal halfway through its
+// lifetime. The token is never logged.
+func (r *Room) sendMedia(m *member, now time.Time) {
+	g, err := r.media.Issue(m.sess.id, m.sess.name, r.id, now)
+	if err != nil {
+		r.log.Error("issue media grant", "id", m.sess.id, "err", err)
+		return
+	}
+	msg, err := encode(typeMedia, mediaMsg{URL: g.URL, Token: g.Token, ExpiresAt: g.ExpiresAt.UnixMilli()})
+	if err != nil {
+		r.log.Error("encode media", "err", err)
+		return
+	}
+	m.renewAt = now.Add(g.ExpiresAt.Sub(now) / 2)
+	m.sess.send(msg)
+}
+
+func (r *Room) sendNearby(s *Session, ids []string) {
+	msg, err := encode(typeNearby, nearbyMsg{IDs: ids})
+	if err != nil {
+		r.log.Error("encode nearby", "err", err)
+		return
+	}
+	s.send(msg)
 }
 
 func (r *Room) broadcast(t string, d any, except string) {

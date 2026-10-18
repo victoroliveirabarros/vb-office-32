@@ -322,3 +322,124 @@ func TestLoadConfigOIDCValues(t *testing.T) {
 		})
 	}
 }
+
+func livekitEnv() map[string]string {
+	return map[string]string{
+		"VB_OFFICE32_AUTH":               "guest",
+		"VB_OFFICE32_LIVEKIT_URL":        "ws://localhost:7880",
+		"VB_OFFICE32_LIVEKIT_API_KEY":    "devkey",
+		"VB_OFFICE32_LIVEKIT_API_SECRET": "secret",
+	}
+}
+
+func TestRunWithMedia(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr, errc := start(t, ctx, livekitEnv())
+
+	conn, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws?name=ana", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	var types []string
+	var grant struct {
+		URL       string `json:"url"`
+		Token     string `json:"token"`
+		ExpiresAt int64  `json:"expiresAt"`
+	}
+	for range 3 {
+		_, msg, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var env struct {
+			T string          `json:"t"`
+			D json.RawMessage `json:"d"`
+		}
+		if err := json.Unmarshal(msg, &env); err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, env.T)
+		if env.T == "media" {
+			if err := json.Unmarshal(env.D, &grant); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !slices.Equal(types, []string{"welcome", "media", "nearby"}) {
+		t.Errorf("first messages = %v, want welcome, media, nearby", types)
+	}
+	if grant.URL != "ws://localhost:7880" || strings.Count(grant.Token, ".") != 2 {
+		t.Errorf("media = %+v", grant)
+	}
+	if left := time.Until(time.UnixMilli(grant.ExpiresAt)); left < 9*time.Minute || left > 10*time.Minute {
+		t.Errorf("grant expires in %v, want 10m", left)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Errorf("run: %v", err)
+	}
+}
+
+func TestLoadConfigLiveKit(t *testing.T) {
+	cfg, err := loadConfig(env(livekitEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (livekitConfig{"ws://localhost:7880", "devkey", "secret"}); cfg.livekit != want {
+		t.Errorf("livekit = %+v, want %+v", cfg.livekit, want)
+	}
+	cfg, err = loadConfig(env(map[string]string{"VB_OFFICE32_AUTH": "guest"}))
+	if err != nil || cfg.livekit != (livekitConfig{}) {
+		t.Errorf("without variables: livekit = %+v, err = %v, want media off", cfg.livekit, err)
+	}
+
+	for _, key := range []string{"VB_OFFICE32_LIVEKIT_URL", "VB_OFFICE32_LIVEKIT_API_KEY", "VB_OFFICE32_LIVEKIT_API_SECRET"} {
+		t.Run("without "+key, func(t *testing.T) {
+			vars := livekitEnv()
+			vars["VB_OFFICE32_LIVEKIT_API_SECRET"] = "s3cr3t"
+			delete(vars, key)
+			_, err := loadConfig(env(vars))
+			if err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("err = %v, want one naming %s", err, key)
+			}
+			if strings.Contains(err.Error(), "s3cr3t") {
+				t.Errorf("error %q echoes the secret", err)
+			}
+		})
+	}
+
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{"wss://media.example", "wss://media.example"},
+		{"wss://media.example:7880/", "wss://media.example:7880"},
+		{"ws://localhost:7880", "ws://localhost:7880"},
+		{"ws://127.0.0.1:7880", "ws://127.0.0.1:7880"},
+		{"ws://media.example", ""},
+		{"https://media.example", ""},
+		{"wss://media.example/rtc", ""},
+		{"wss://media.example?x=1", ""},
+		{"wss://user:s3cr3t@media.example", ""},
+		{"media.example", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			vars := livekitEnv()
+			vars["VB_OFFICE32_LIVEKIT_URL"] = tt.value
+			cfg, err := loadConfig(env(vars))
+			if tt.want == "" {
+				if err == nil || !strings.Contains(err.Error(), "VB_OFFICE32_LIVEKIT_URL") || strings.Contains(err.Error(), "s3cr3t") {
+					t.Errorf("err = %v, want one naming VB_OFFICE32_LIVEKIT_URL without its value", err)
+				}
+				return
+			}
+			if err != nil || cfg.livekit.url != tt.want {
+				t.Errorf("url = %q, err = %v, want %q", cfg.livekit.url, err, tt.want)
+			}
+		})
+	}
+}
