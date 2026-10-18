@@ -112,18 +112,29 @@ vb-office-32 at it with:
 | `VB_OFFICE32_LIVEKIT_API_SECRET` | the matching secret | yes |
 
 Set all three or none. Besides signing tokens, vb-office-32 calls the
-LiveKit room service (`RemoveParticipant`) at the same host over `http(s)`
-30 seconds after a player's WebSocket closes for good, so the pod needs
-egress to that URL as well as the browser. A failed call is logged as a
-warning and retried once. Deliver the secret like the other secrets above.
+LiveKit room service at the same host over `http(s)`: `RemoveParticipant`
+30 seconds after a player's WebSocket closes for good or as soon as someone
+without a WebSocket joins, and `ListParticipants` once a minute as a safety
+net. The pod needs egress to that URL as well as the browser. A failed
+removal is logged as a warning and retried once; a failed list is logged and
+tried again a minute later. Deliver the secret like the other secrets above.
+
+LiveKit must also post its webhooks to `POST <server>/livekit/webhook`
+(`webhook.urls` and `webhook.api_key` in `livekit.yaml`, see
+[`livekit.md`](livekit.md#removal)). The route checks LiveKit's signature
+(HS256 with the API secret, SHA-256 of the body) and answers 401 otherwise,
+so it may go through the public ingress; an internal URL works as well when
+LiveKit runs in the same network. Without webhooks the periodic list still
+removes intruders, only up to a minute later.
 
 ## Security headers
 
 All responses carry CSP, `X-Content-Type-Options`, `Referrer-Policy`,
 `Permissions-Policy` and `Cross-Origin-Opener-Policy` (see the
 [README](../README.md#security-headers)); the CSP already allows the LiveKit
-URL and the OIDC issuer from the configuration. HSTS
-(`max-age=31536000`) is sent only when `VB_OFFICE32_PUBLIC_URL` is https.
+URL from the configuration. HSTS (`max-age=31536000`) is sent only when
+`VB_OFFICE32_PUBLIC_URL` is https, that is in oidc mode; serve production in
+oidc mode behind https.
 Proxies in front must not strip or replace these headers, and a page served
 from another host needs that host in the CSP, which is not configurable.
 

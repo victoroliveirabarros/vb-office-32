@@ -59,7 +59,9 @@ are reissued about every 5 (the server checks once a minute); the server
 never logs them. A player whose WebSocket stays closed for 30 seconds is
 removed from the LiveKit room through its API, since LiveKit would otherwise
 keep renewing that connection; reconnecting within the 30 seconds keeps the
-call. Network, cost and a
+call. Anyone who joins the LiveKit room without a WebSocket here is removed
+as soon as LiveKit reports it (webhook on `POST /livekit/webhook`), and once a
+minute the server also lists the room as a safety net. Network, cost and a
 minimal LiveKit configuration are in [`docs/livekit.md`](docs/livekit.md).
 
 In the browser the LiveKit SDK loads only when the first `media` arrives.
@@ -118,21 +120,28 @@ Change them with flags (`go run ./cmd/devidp -h`), `DEVIDP_FLAGS` or the
 ## Security headers
 
 Every response carries a `Content-Security-Policy` that allows scripts,
-styles and fonts from the page's own origin only (no inline code), images
-and media also from `data:`/`blob:`, connections to the page's origin and to
-the LiveKit URL (`ws(s)://` and `http(s)://`), forms and login redirects to
-the page's origin and the OIDC issuer, and no framing. They also get
+styles, media and fonts from the page's own origin only (no inline code;
+audio and video play from `MediaStream`s), images also from `data:`/`blob:`,
+connections to the page's origin and to the LiveKit URL (`ws(s)://` and
+`http(s)://`), forms to the page's origin only (login is a link, not a
+form), and no framing. They also get
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
 `Permissions-Policy` (camera and microphone for the page only, no
 geolocation or screen capture) and `Cross-Origin-Opener-Policy:
 same-origin`; `Strict-Transport-Security: max-age=31536000` is added when
-`VB_OFFICE32_PUBLIC_URL` is https.
+`VB_OFFICE32_PUBLIC_URL` is https, which only exists in oidc mode, so guest
+mode never sends HSTS.
 
 The Vite dev server does not send these headers: check CSP changes against
 the build served by the Go server (`make web-build` and `make run`, then
 open http://localhost:8080). In dev, Vite answers only for `localhost` and
 `127.0.0.1` and refuses `/ws` upgrades for any other `Host`, which blocks
-DNS rebinding through its proxy.
+DNS rebinding through its proxy. The Go server reached directly (port 8080,
+without Vite) does not check `Host`: in guest mode a rebound page sees
+matching `Host` and `Origin` and can open `/ws` under any name, which is
+harmless because guest mode lets anyone do that anyway (development only).
+In oidc mode rebinding gains nothing, since the session cookie belongs to
+the real host name and is not sent to the rebound one.
 
 ## Endpoints
 
@@ -144,6 +153,7 @@ DNS rebinding through its proxy.
 | `/api/session` | Current user: 200 `{id, name, auth}` or 401 `{auth}`. |
 | `/auth/login`, `/auth/callback`, `POST /auth/logout` | OIDC login (oidc mode only). |
 | `/maps/*`  | Map files. |
+| `POST /livekit/webhook` | LiveKit webhooks, signed with the API secret (with media only). |
 | `/`        | Frontend. |
 
 On SIGTERM the server turns not ready, closes sessions with 1001
@@ -158,8 +168,8 @@ make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
 
-# token and participant removal checks against a running LiveKit (make livekit)
-VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media
+# token, removal and reconciliation checks against a running LiveKit (make livekit)
+VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime
 ```
 
 The wire protocol and map format are specified in

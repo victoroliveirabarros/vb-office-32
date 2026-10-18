@@ -29,10 +29,14 @@ Escopo e decisões em [`phase3.md`](phase3.md). Envs `VB_OFFICE32_LIVEKIT_URL`, 
 
 Escopo em [`security-hardening.md`](security-hardening.md): `RemoveParticipant` 30 s após o WS fechar (carência cancelada por reconexão; nada removido no shutdown), CSP e headers em todas as respostas (HSTS só com `PUBLIC_URL` https; `<style>` do `index.html` movido para `web/src/style.css`), `VB_OFFICE32_SESSION_KEY_PREVIOUS` e checagem de `Host` no upgrade `/ws` do Vite (M6; `allowedHosts` sozinho não cobre o proxy WS no Vite 8). Desvio: o cliente passou a esperar o próximo `media` depois de `removed` (antes parava de vez), senão quem ficasse mais de 30 s sem WS perderia a mídia até recarregar a página.
 
+## Revogação persistente de mídia (feito)
+
+S5 em [`security-hardening.md`](security-hardening.md): webhook `participant_joined` remove na hora quem está ativo no LiveKit sem WS nem carência; `ListParticipants` a cada 1 min como rede de segurança; `media` reemitido quando uma remoção termina com a identidade de volta; o cliente reconecta na hora se a remoção chega menos de 10 s depois de um `media`. Junto: `form-action 'self'`, `media-src 'self'`, aviso quando `SESSION_KEY_PREVIOUS` = `SESSION_KEY`, log de remoção em Info só quando havia participante.
+
 ## Depois do hardening
 
-- Revogação de mídia persistente: removido, um cliente modificado entra de novo no LiveKit com o último token que tem (o nosso, até 10 min, ou o renovado pelo próprio LiveKit) e volta a ser renovado indefinidamente. Fechar com reconciliação periódica (`ListParticipants` no check de mídia de 1 min, removendo identidades fora de `members` e fora da carência).
-- Corrida pequena: a remoção já em voo quando a identidade reconecta derruba a mídia recém-reconectada; o cliente honesto volta no próximo `media` (até ~5 min).
+- Revogação total de mídia: o LiveKit entrega um token novo de 10 min 1 ms após cada join, antes de qualquer webhook, então um cliente modificado reentra para sempre (cada tentativa dura ~40 ms com webhook e não completa a mídia, mas vê quem está na sala). Fechar exigiria trocar o API secret, rodar o LiveKit com TTL de refresh menor (não configurável no v1.13) ou uma lista de bloqueio no próprio LiveKit. `UpdateParticipant` antes do Remove não resolve (validado).
+- Teste automatizado do webhook com participante ativo (precisa de cliente WebRTC; hoje validado à mão com Chrome headless).
 
 ## Descartado
 

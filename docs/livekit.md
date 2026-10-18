@@ -43,7 +43,7 @@ in its `nearby` set. Anyone holding a token can technically subscribe to
 anyone in the room, which matches an open-plan office; private rooms come
 with zones as separate LiveKit rooms.
 
-## Removal on leave
+## Removal
 
 LiveKit renews the token of a connected participant by itself, so closing
 the game, an expired session (4002) or a removed domain would not end the
@@ -57,15 +57,53 @@ warning, never with the token. A replaced session (4001) keeps its identity
 connected, so nothing is removed, and a server shutdown cancels pending
 removals because clients reconnect to the next process.
 
-The honest client disconnects by itself when its session ends; after a
-removal it waits for the next `media` message, which the server sends as
-soon as the WebSocket is back. A removed client still holds a token valid
-for up to 10 minutes (the last one we sent, or the one LiveKit renewed), so
-a modified client can join again within that window; the backlog has the
-follow-up.
+A removed client still holds a valid token: the last one we sent (up to 10
+minutes), or the one LiveKit hands out on every join and renews while
+connected. Two mechanisms keep a modified client out:
+
+- **Webhook.** LiveKit posts `participant_joined` to
+  `POST /livekit/webhook` when a participant becomes active (media
+  connected). If that identity has no WebSocket here and is not within its
+  30 seconds, vb-office-32 removes it at once, whether or not we ever issued
+  it. The request must carry `Content-Type: application/webhook+json` and an
+  `Authorization` header with a JWT that LiveKit signs (HS256 with the API
+  secret, `iss` = API key, `sha256` = base64 of the body's SHA-256, valid
+  for 5 minutes; 30 seconds of clock skew are tolerated). Anything else gets
+  401 or 400; bodies are limited to 1 MiB and the token is never logged.
+  Measured on v1.13 with a browser client: removal 2 ms after LiveKit
+  marks the participant active, about 40 ms after its join, before the SDK
+  finishes connecting; joining again with the same token is removed the
+  same way every time.
+- **Reconciliation.** Once a minute, on the same check that renews grants,
+  vb-office-32 lists the room (`ListParticipants`, same admin token) and
+  removes every identity without a WebSocket and outside its 30 seconds.
+  It catches what the webhook cannot: a lost webhook, and a client that
+  only opens the signaling connection without ever connecting media
+  (LiveKit sends no `participant_joined` for it, and drops it by itself
+  after 60 seconds). Only one list is in flight at a time; a failed list is
+  logged as a warning and the next check tries again. The decision uses the
+  players connected when the list comes back, not when it was asked for.
+
+What remains: LiveKit sends a fresh 10-minute token 1 ms after every join,
+before the participant is active, so a modified client can keep joining
+forever; each attempt lasts about 40 ms with the webhook (up to a minute
+without it) and gets the list of who is in the room, but no call. Revoking
+the permissions with `UpdateParticipant` before removing would not help,
+since the token is already out. Rotating the API secret is the only full
+revocation.
+
+A removal already sent can still land on a player whose WebSocket came back
+meanwhile. When a removal finishes and that identity is connected, the
+server sends it a new `media` message at once. The honest client waits for
+the next `media` after a removal and, when the removal arrives less than
+10 seconds after a grant (the server never removes anyone that recent),
+connects again with that grant right away, so the call comes back within
+seconds.
 
 The room service is reached through the same TLS proxy as signaling, so
-vb-office-32 needs egress to the LiveKit URL. The page's CSP allows that URL
+vb-office-32 needs egress to the LiveKit URL. In the other direction LiveKit needs
+to reach vb-office-32's `/livekit/webhook`, through the public URL or an
+internal one. The page's CSP allows that URL
 in `connect-src` (`ws(s)://` for signaling and `http(s)://` for the SDK's
 connection checks).
 
@@ -130,6 +168,10 @@ room:
   empty_timeout: 300
 prometheus:
   port: 6789            # keep it private
+webhook:
+  api_key: <api key>    # signs the webhooks with its secret
+  urls:
+    - https://office.example.com/livekit/webhook
 # keys come from the environment, not from this file:
 #   LIVEKIT_KEYS="<api key>: <api secret>"
 ```
@@ -203,6 +245,13 @@ LiveKit exposes Prometheus metrics on `prometheus.port`. Useful signals:
 make livekit   # LiveKit --dev on :7880 with key devkey and secret secret
 ```
 
+`make livekit` also passes `LIVEKIT_CONFIG` (configuration given as YAML in
+an environment variable) so LiveKit posts webhooks to
+`http://127.0.0.1:8080/livekit/webhook`, the server of `make run`. Point it
+elsewhere with `make livekit LIVEKIT_WEBHOOK=http://127.0.0.1:9090/livekit/webhook`.
+While the server is down LiveKit logs failed webhooks; the periodic list
+still removes intruders.
+
 `.env.example` has the matching block (`ws://localhost:7880`, `devkey`,
 `secret`), and `make dev-oidc` starts LiveKit too when
 `VB_OFFICE32_LIVEKIT_URL` points at `ws://localhost` or `ws://127.0.0.1`. In guest mode run `make livekit`,
@@ -223,12 +272,14 @@ publish the ports and give LiveKit an address the browser can reach:
 
 ```sh
 docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
+  -e LIVEKIT_CONFIG="webhook: {api_key: devkey, urls: [http://host.docker.internal:8080/livekit/webhook]}" \
   livekit/livekit-server:v1.13 --dev --bind 0.0.0.0 --node-ip 127.0.0.1
 ```
 
-The token and removal checks against a real server run with:
+The token, removal and reconciliation checks against a real server run
+with:
 
 ```sh
 make livekit &
-VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media
+VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime
 ```
