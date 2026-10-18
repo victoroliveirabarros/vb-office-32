@@ -1,6 +1,6 @@
 # vb-office-32
 
-A small Gather-style virtual office: a tile map where teammates walk around in
+A small virtual office: a tile map where teammates walk around in
 real time. The Go server is authoritative; the browser client lives in `web/`.
 
 ## Run
