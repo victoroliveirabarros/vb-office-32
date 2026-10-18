@@ -110,11 +110,24 @@ export function createMediaView(): BoundMediaView {
   }
 }
 
+export type DeviceButton = { pressed: boolean; disabled: boolean; error: boolean; label: string }
+
+// A stopped link carries nothing, so its buttons show the devices off.
+export function deviceButton(state: DeviceState, stopped: boolean, device: string): DeviceButton {
+  const on = state.on && !stopped
+  return {
+    pressed: on,
+    disabled: state.busy || stopped,
+    error: state.error !== null,
+    label: `${on ? 'Desligar' : 'Ligar'} ${device}`,
+  }
+}
+
 function renderButton(button: HTMLButtonElement, state: DeviceState, stopped: boolean, device: string): void {
-  button.setAttribute('aria-pressed', String(state.on))
-  button.classList.toggle('error', state.error !== null)
-  button.disabled = state.busy || stopped
-  const label = `${state.on ? 'Desligar' : 'Ligar'} ${device}`
-  button.title = label
-  button.setAttribute('aria-label', label)
+  const view = deviceButton(state, stopped, device)
+  button.setAttribute('aria-pressed', String(view.pressed))
+  button.classList.toggle('error', view.error)
+  button.disabled = view.disabled
+  button.title = view.label
+  button.setAttribute('aria-label', view.label)
 }
