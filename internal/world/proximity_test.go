@@ -127,6 +127,24 @@ func TestProximityJoinIsEvaluatedOnNextStep(t *testing.T) {
 	}
 }
 
+func TestProximityReplacementSkipsPendingChange(t *testing.T) {
+	s := NewSpace(asciiMap(t, "012"))
+	for _, id := range []string{"a", "b", "c"} {
+		s.Join(id, id)
+	}
+	s.Step(at(0))
+
+	s.Leave("c")
+	s.Join("a", "A2")
+	if got := s.Nearby("a"); !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("nearby(a) on replacement = %v, want [b]", got)
+	}
+	d := s.Step(at(1))
+	if want := map[string][]string{"b": {"a"}}; !maps.EqualFunc(d.Nearby, want, slices.Equal) {
+		t.Errorf("nearby = %v, want %v (a already has its set)", d.Nearby, want)
+	}
+}
+
 func TestProximityLeaveNotifiesNeighbors(t *testing.T) {
 	s := NewSpace(asciiMap(t, "012......3"))
 	for _, id := range []string{"a", "b", "c", "d"} {

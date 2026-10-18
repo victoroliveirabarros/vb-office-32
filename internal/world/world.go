@@ -128,13 +128,16 @@ func NewSpace(m *tilemap.Map) *Space {
 }
 
 // Join adds a player or, if id is already present, resets its input state
-// for a new connection while keeping its position and near set. A new
-// player's near set is computed by the next Step.
+// for a new connection while keeping its position and near set. The new
+// connection is expected to read Nearby, so a pending change to that set is
+// not reported again by Step. A new player's near set is computed by the
+// next Step.
 func (s *Space) Join(id, name string) Player {
 	if p, ok := s.players[id]; ok {
 		p.Name = name
 		p.queue = p.queue[:0]
 		p.lastSeq = 0
+		delete(s.nearBefore, id)
 		return p.Player
 	}
 
