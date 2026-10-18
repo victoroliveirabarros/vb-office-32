@@ -29,11 +29,10 @@ func startServer(t *testing.T) string {
 
 func startServerWith(t *testing.T, authn Authenticator, maxSessions int) string {
 	t.Helper()
-	return serve(t, authn, maxSessions, nil, 0)
+	return serve(t, authn, maxSessions, nil)
 }
 
-// serve starts a server; mediaCheck overrides the renewal interval if set.
-func serve(t *testing.T, authn Authenticator, maxSessions int, mi MediaIssuer, mediaCheck time.Duration) string {
+func serve(t *testing.T, authn Authenticator, maxSessions int, mi MediaIssuer) string {
 	t.Helper()
 	m, err := tilemap.LoadFile("testdata/small.tmj")
 	if err != nil {
@@ -41,9 +40,6 @@ func serve(t *testing.T, authn Authenticator, maxSessions int, mi MediaIssuer, m
 	}
 	log := slog.New(slog.DiscardHandler)
 	room := NewRoom(DefaultSpace, "small", world.NewSpace(m), mi, log)
-	if mediaCheck > 0 {
-		room.mediaCheck = mediaCheck
-	}
 	hub := NewHub(room)
 
 	ctx, cancel := context.WithCancel(context.Background())

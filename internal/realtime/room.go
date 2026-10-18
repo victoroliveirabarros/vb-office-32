@@ -15,7 +15,8 @@ import (
 
 const (
 	shutdownTimeout = 5 * time.Second
-	mediaCheck      = time.Minute
+	// mediaCheck is how often grants due for renewal are reissued.
+	mediaCheck = time.Minute
 )
 
 var errRoomClosed = errors.New("room closed")
@@ -47,9 +48,6 @@ type Room struct {
 	media MediaIssuer
 	log   *slog.Logger
 
-	// mediaCheck is how often grants due for renewal are reissued.
-	mediaCheck time.Duration
-
 	joins   chan *Session
 	leaves  chan *Session
 	inputs  chan sessionInput
@@ -59,17 +57,16 @@ type Room struct {
 
 func NewRoom(id, mapID string, space *world.Space, mi MediaIssuer, log *slog.Logger) *Room {
 	return &Room{
-		id:         id,
-		mapID:      mapID,
-		space:      space,
-		media:      mi,
-		log:        log.With("room", id),
-		mediaCheck: mediaCheck,
-		joins:      make(chan *Session),
-		leaves:     make(chan *Session),
-		inputs:     make(chan sessionInput, 256),
-		done:       make(chan struct{}),
-		members:    make(map[string]*member),
+		id:      id,
+		mapID:   mapID,
+		space:   space,
+		media:   mi,
+		log:     log.With("room", id),
+		joins:   make(chan *Session),
+		leaves:  make(chan *Session),
+		inputs:  make(chan sessionInput, 256),
+		done:    make(chan struct{}),
+		members: make(map[string]*member),
 	}
 }
 
@@ -79,7 +76,7 @@ func (r *Room) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	var renew <-chan time.Time
 	if r.media != nil {
-		t := time.NewTicker(r.mediaCheck)
+		t := time.NewTicker(mediaCheck)
 		defer t.Stop()
 		renew = t.C
 	}

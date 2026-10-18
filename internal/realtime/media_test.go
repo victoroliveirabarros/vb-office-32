@@ -1,17 +1,21 @@
 package realtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
 	"github.com/victoroliveirabarros/vb-office-32/internal/media"
+	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
@@ -50,7 +54,7 @@ func nearbyIs(ids ...string) func(nearbyMsg) bool {
 }
 
 func TestMediaAndNearby(t *testing.T) {
-	url := serve(t, auth.Guest{}, 10, &fakeIssuer{ttl: time.Hour}, 0)
+	url := serve(t, auth.Guest{}, 10, &fakeIssuer{ttl: time.Hour})
 
 	before := time.Now()
 	ana := dial(t, url, "Ana")
@@ -96,20 +100,85 @@ func TestMediaAndNearby(t *testing.T) {
 	}
 }
 
+// TestMediaRenewal runs the room on a fake clock: a 10-minute grant is
+// renewed by the first check at or after its halfway point.
 func TestMediaRenewal(t *testing.T) {
-	url := serve(t, auth.Guest{}, 10, &fakeIssuer{ttl: 200 * time.Millisecond}, 10*time.Millisecond)
-	c := dial(t, url, "Ana")
-	next[welcomeMsg](c, typeWelcome)
-	first := next[mediaMsg](c, typeMedia)
+	m, err := tilemap.LoadFile("testdata/small.tmj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		const ttl = 10 * time.Minute
+		log := slog.New(slog.DiscardHandler)
+		room := NewRoom(DefaultSpace, "small", world.NewSpace(m), &fakeIssuer{ttl: ttl}, log)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error)
+		go func() { done <- room.Run(ctx) }()
+		defer func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Errorf("run: %v", err)
+			}
+		}()
 
-	start := time.Now()
-	renewed := expect[mediaMsg](c, typeMedia, nil)
-	if renewed.Token == first.Token || renewed.ExpiresAt <= first.ExpiresAt {
-		t.Errorf("renewed = %+v after %+v, want a newer grant", renewed, first)
+		s := newSession(auth.Identity{ID: "guest:ana", Name: "Ana"}, nil, room, log)
+		if err := room.join(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		start := time.Now()
+		var first mediaMsg
+		for _, typ := range []string{typeWelcome, typeMedia, typeNearby} {
+			env := received(t, s)
+			if env.T != typ {
+				t.Fatalf("got %s, want %s", env.T, typ)
+			}
+			if typ == typeMedia {
+				first = decode[mediaMsg](t, env)
+			}
+		}
+
+		time.Sleep(ttl/2 - time.Nanosecond)
+		synctest.Wait()
+		if len(s.out) != 0 {
+			t.Fatalf("got %s before the halfway point", <-s.out)
+		}
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		env := received(t, s)
+		if env.T != typeMedia {
+			t.Fatalf("got %s at the halfway point, want media", env.T)
+		}
+		renewed := decode[mediaMsg](t, env)
+		if renewed.Token == first.Token || renewed.ExpiresAt != start.Add(ttl/2+ttl).UnixMilli() {
+			t.Errorf("renewed = %+v after %+v, want a grant issued at the halfway point", renewed, first)
+		}
+	})
+}
+
+func received(t *testing.T, s *Session) envelope {
+	t.Helper()
+	select {
+	case b := <-s.out:
+		var env envelope
+		if err := json.Unmarshal(b, &env); err != nil {
+			t.Fatalf("decode %s: %v", b, err)
+		}
+		return env
+	default:
+		t.Fatal("no message queued")
+		return envelope{}
 	}
-	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
-		t.Errorf("renewed after %v, want about halfway through the 200ms grant", elapsed)
+}
+
+func decode[T any](t *testing.T, env envelope) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal(env.D, &v); err != nil {
+		t.Fatalf("decode %s: %v", env.T, err)
 	}
+	return v
 }
 
 func TestNoMediaWithoutIssuer(t *testing.T) {
