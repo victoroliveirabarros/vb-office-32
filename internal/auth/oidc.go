@@ -49,7 +49,10 @@ type OIDCConfig struct {
 	// AllowedDomains must be lowercase.
 	AllowedDomains []string
 	SessionKey     []byte
-	Log            *slog.Logger
+	// PreviousSessionKey, when set, still verifies cookies signed before a
+	// rotation; new cookies are always signed with SessionKey.
+	PreviousSessionKey []byte
+	Log                *slog.Logger
 }
 
 // OIDC authenticates with an OpenID Connect provider and keeps the result in
@@ -108,14 +111,21 @@ func NewOIDC(cfg OIDCConfig) (*OIDC, error) {
 	if len(cfg.SessionKey) < minSessionKey {
 		return nil, fmt.Errorf("session key must have at least %d bytes", minSessionKey)
 	}
+	keys := [][]byte{cfg.SessionKey}
+	if len(cfg.PreviousSessionKey) > 0 {
+		if len(cfg.PreviousSessionKey) < minSessionKey {
+			return nil, fmt.Errorf("previous session key must have at least %d bytes", minSessionKey)
+		}
+		keys = append(keys, cfg.PreviousSessionKey)
+	}
 	if len(cfg.AllowedDomains) == 0 {
 		return nil, errors.New("no allowed domains")
 	}
-	session, err := newSigner(cfg.SessionKey, purposeSession)
+	session, err := newSigner(purposeSession, keys...)
 	if err != nil {
 		return nil, err
 	}
-	flow, err := newSigner(cfg.SessionKey, purposeFlow)
+	flow, err := newSigner(purposeFlow, keys...)
 	if err != nil {
 		return nil, err
 	}
