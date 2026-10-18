@@ -50,14 +50,30 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
+	var (
+		authn realtime.Authenticator = auth.Guest{}
+		login httpapi.OIDC
+	)
+	if cfg.auth == authOIDC {
+		cfg.oidc.Log = log
+		o, err := auth.NewOIDC(cfg.oidc)
+		if err != nil {
+			return fmt.Errorf("oidc: %w", err)
+		}
+		authn, login = o, o
+	} else {
+		log.Warn("guest auth: anyone can join under any name; use only for development")
+	}
+
 	var ready atomic.Bool
 	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), log))
-	ws := realtime.NewHandler(hub, auth.Guest{}, cfg.allowedOrigins, cfg.maxSessions, log)
+	ws := realtime.NewHandler(hub, authn, cfg.allowedOrigins, cfg.maxSessions, log)
 	srv := httpapi.NewServer(httpapi.NewHandler(httpapi.Options{
 		WS:      ws,
 		Ready:   ready.Load,
 		MapsDir: cfg.mapsDir,
 		WebDir:  cfg.webDir,
+		OIDC:    login,
 	}))
 	srv.ErrorLog = slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 
@@ -65,7 +81,7 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Info("listening", "addr", ln.Addr().String(), "max_sessions", cfg.maxSessions)
+	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions)
 
 	// The hub outlives ctx so sessions are closed only after readiness has
 	// turned false, while the listener still answers /readyz with 503.

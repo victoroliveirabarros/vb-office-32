@@ -384,8 +384,61 @@ func TestAuthErrorIsNotLeaked(t *testing.T) {
 	}
 }
 
+type expiringAuth struct{ ttl time.Duration }
+
+func (a expiringAuth) Authenticate(*http.Request) (auth.Identity, error) {
+	return auth.Identity{ID: "oidc:42", Name: "Zé", Expires: time.Now().Add(a.ttl)}, nil
+}
+
+func TestSessionClosesAtExpiry(t *testing.T) {
+	url := startServerWith(t, expiringAuth{ttl: 200 * time.Millisecond}, 1)
+	c := dial(t, url, "")
+	if w := expect[welcomeMsg](c, typeWelcome, nil); w.SelfID != "oidc:42" {
+		t.Errorf("selfId = %q, want oidc:42", w.SelfID)
+	}
+	for {
+		_, err := c.read()
+		if err == nil {
+			continue
+		}
+		var ce websocket.CloseError
+		if !errors.As(err, &ce) || ce.Code != statusExpired || ce.Reason != reasonExpired {
+			t.Fatalf("close = %v, want 4002 %q", err, reasonExpired)
+		}
+		return
+	}
+}
+
+func TestOIDCWithoutCookieRejectedBeforeUpgrade(t *testing.T) {
+	o, err := auth.NewOIDC(auth.OIDCConfig{
+		PublicURL:      "http://localhost:5173",
+		Issuer:         "http://127.0.0.1:1",
+		AllowedDomains: []string{"example.com"},
+		SessionKey:     []byte(strings.Repeat("k", 32)),
+		Log:            slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := startServerWith(t, o, 1)
+	for _, cookie := range []string{"", "vb_office32_session=forged.value"} {
+		h := http.Header{}
+		if cookie != "" {
+			h.Set("Cookie", cookie)
+		}
+		conn, res, err := websocket.Dial(context.Background(), url+"?name=Ana", &websocket.DialOptions{HTTPHeader: h})
+		if err == nil {
+			conn.CloseNow()
+			t.Fatalf("cookie %q: dial succeeded, want 401", cookie)
+		}
+		if res == nil || res.StatusCode != http.StatusUnauthorized {
+			t.Errorf("cookie %q: response = %v, want 401", cookie, res)
+		}
+	}
+}
+
 func TestSlowConsumerIsClosed(t *testing.T) {
-	s := newSession("guest:x", "x", nil, nil, slog.New(slog.DiscardHandler))
+	s := newSession(auth.Identity{ID: "guest:x", Name: "x"}, nil, nil, slog.New(slog.DiscardHandler))
 	for range sendBuffer {
 		s.send([]byte("{}"))
 	}
@@ -415,6 +468,7 @@ func TestCloseReasonLevel(t *testing.T) {
 		{closeReason{websocket.StatusPolicyViolation, "invalid message"}, slog.LevelWarn},
 		{closeReason{websocket.StatusGoingAway, reasonPingTimeout}, slog.LevelWarn},
 		{closeReason{statusReplaced, reasonReplaced}, slog.LevelInfo},
+		{closeReason{statusExpired, reasonExpired}, slog.LevelInfo},
 		{closeReason{websocket.StatusPolicyViolation, reasonRateLimit}, slog.LevelWarn},
 		{closeReason{websocket.StatusGoingAway, reasonRestarting}, slog.LevelDebug},
 		{closeReason{websocket.StatusNormalClosure, ""}, slog.LevelDebug},

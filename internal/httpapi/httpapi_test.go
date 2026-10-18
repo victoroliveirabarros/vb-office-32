@@ -1,13 +1,30 @@
 package httpapi
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
 )
+
+type fakeOIDC struct{}
+
+func (fakeOIDC) Authenticate(r *http.Request) (auth.Identity, error) {
+	if c, err := r.Cookie("s"); err == nil && c.Value == "ok" {
+		return auth.Identity{ID: "oidc:42", Name: "Zé", Expires: time.Now().Add(time.Hour)}, nil
+	}
+	return auth.Identity{}, errors.New("no session")
+}
+
+func (fakeOIDC) Login(w http.ResponseWriter, _ *http.Request)    { w.WriteHeader(http.StatusFound) }
+func (fakeOIDC) Callback(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusSeeOther) }
+func (fakeOIDC) Logout(w http.ResponseWriter, _ *http.Request)   { w.WriteHeader(http.StatusNoContent) }
 
 func TestHandler(t *testing.T) {
 	maps, web := t.TempDir(), t.TempDir()
@@ -34,6 +51,8 @@ func TestHandler(t *testing.T) {
 	noWeb := NewHandler(Options{WS: ws, Ready: ready, MapsDir: maps, WebDir: filepath.Join(web, "missing")})
 	noIndexWeb := NewHandler(Options{WS: ws, Ready: ready, MapsDir: maps, WebDir: noIndex})
 	draining := NewHandler(Options{WS: ws, Ready: notReady, MapsDir: maps, WebDir: web})
+	oidc := NewHandler(Options{WS: ws, Ready: ready, MapsDir: maps, WebDir: web, OIDC: fakeOIDC{}})
+	session := http.Header{"Cookie": {"s=ok"}}
 
 	tests := []struct {
 		name        string
@@ -68,6 +87,17 @@ func TestHandler(t *testing.T) {
 		{"cross-site post", h, "POST", "/healthz", http.Header{"Sec-Fetch-Site": {"cross-site"}}, http.StatusForbidden, "", ""},
 		{"cross-origin post", h, "POST", "/healthz", http.Header{"Origin": {"https://evil.example"}}, http.StatusForbidden, "", ""},
 		{"cross-site get", h, "GET", "/healthz", http.Header{"Sec-Fetch-Site": {"cross-site"}}, 200, "ok\n", ""},
+		{"guest session", h, "GET", "/api/session", session, 401, `{"auth":"guest"}` + "\n", "application/json"},
+		{"guest login route", h, "GET", "/auth/login", nil, 404, "", ""},
+		{"guest logout route", h, "POST", "/auth/logout", nil, http.StatusMethodNotAllowed, "", ""},
+		{"oidc no session", oidc, "GET", "/api/session", nil, 401, `{"auth":"oidc"}` + "\n", "application/json"},
+		{"oidc session", oidc, "GET", "/api/session", session, 200, `{"id":"oidc:42","name":"Zé","auth":"oidc"}` + "\n", "application/json"},
+		{"oidc login", oidc, "GET", "/auth/login", nil, http.StatusFound, "", ""},
+		{"oidc callback", oidc, "GET", "/auth/callback?code=x&state=y", nil, http.StatusSeeOther, "", ""},
+		{"oidc logout", oidc, "POST", "/auth/logout", http.Header{"Sec-Fetch-Site": {"same-origin"}}, http.StatusNoContent, "", ""},
+		{"oidc logout by get", oidc, "GET", "/auth/logout", nil, 404, "", ""},
+		{"oidc logout cross-site", oidc, "POST", "/auth/logout", http.Header{"Sec-Fetch-Site": {"cross-site"}}, http.StatusForbidden, "", ""},
+		{"oidc logout cross-origin", oidc, "POST", "/auth/logout", http.Header{"Origin": {"https://evil.example"}}, http.StatusForbidden, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +118,9 @@ func TestHandler(t *testing.T) {
 			}
 			if got := res.Header.Get("Content-Type"); tt.contentType != "" && got != tt.contentType {
 				t.Errorf("content type = %q, want %q", got, tt.contentType)
+			}
+			if got := res.Header.Get("Cache-Control"); tt.path == "/api/session" && got != "no-store" {
+				t.Errorf("cache control = %q, want no-store", got)
 			}
 		})
 	}

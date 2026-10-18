@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
@@ -20,8 +21,10 @@ const (
 	writeTimeout   = 10 * time.Second
 
 	statusReplaced websocket.StatusCode = 4001
+	statusExpired  websocket.StatusCode = 4002
 
 	reasonReplaced     = "replaced"
+	reasonExpired      = "session expired"
 	reasonSlowConsumer = "slow consumer"
 	reasonPingTimeout  = "ping timeout"
 	reasonRateLimit    = "rate limit"
@@ -39,7 +42,7 @@ func (c closeReason) level() slog.Level {
 	switch {
 	case c.code == websocket.StatusPolicyViolation, c.reason == reasonPingTimeout:
 		return slog.LevelWarn
-	case c.code == statusReplaced:
+	case c.code == statusReplaced, c.code == statusExpired:
 		return slog.LevelInfo
 	}
 	return slog.LevelDebug
@@ -48,11 +51,12 @@ func (c closeReason) level() slog.Level {
 // Session is one WebSocket connection. Its send side never blocks: a full
 // buffer closes the connection instead of stalling the room.
 type Session struct {
-	id   string
-	name string
-	conn *websocket.Conn
-	room *Room
-	log  *slog.Logger
+	id      string
+	name    string
+	expires time.Time
+	conn    *websocket.Conn
+	room    *Room
+	log     *slog.Logger
 
 	limiter   tokenBucket
 	out       chan []byte
@@ -62,10 +66,11 @@ type Session struct {
 	closeWith closeReason
 }
 
-func newSession(id, name string, conn *websocket.Conn, room *Room, log *slog.Logger) *Session {
+func newSession(id auth.Identity, conn *websocket.Conn, room *Room, log *slog.Logger) *Session {
 	return &Session{
-		id:      id,
-		name:    name,
+		id:      id.ID,
+		name:    id.Name,
+		expires: id.Expires,
 		conn:    conn,
 		room:    room,
 		log:     log,
@@ -94,6 +99,10 @@ func (s *Session) close(code websocket.StatusCode, reason string) {
 
 func (s *Session) run(ctx context.Context) {
 	defer close(s.ended)
+	if !s.expires.IsZero() {
+		t := time.AfterFunc(time.Until(s.expires), func() { s.close(statusExpired, reasonExpired) })
+		defer t.Stop()
+	}
 	var wg sync.WaitGroup
 	wg.Go(func() { s.writeLoop(ctx) })
 	wg.Go(func() { s.pingLoop(ctx) })
