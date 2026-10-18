@@ -64,11 +64,13 @@ Notes:
 - `VB_OFFICE32_PUBLIC_URL` is the only source of the scheme and host. The
   server ignores `X-Forwarded-Proto`/`X-Forwarded-Host` and the TLS state of
   its own connection, so a proxy that terminates TLS needs no extra headers.
-  With `https` the session cookie gets the `__Host-` prefix and `Secure`.
+  With `https` the session and login-flow cookies get the `__Host-` prefix
+  and `Secure`.
 - The provider is contacted on the first login, not at boot, and discovery
   is retried until it succeeds, so a sidecar or egress path that becomes
   ready after the container does not crash it. While the provider is
-  unreachable `/auth/login` answers 503. Outbound requests time out after
+  unreachable `/auth/login` answers 503, and so do logins that arrive while
+  the first discovery is still running. Outbound requests time out after
   10 s.
 - The pod needs egress to the issuer (for Google, `accounts.google.com`,
   `oauth2.googleapis.com` and `www.googleapis.com`).

@@ -47,7 +47,8 @@ code flow with PKCE; the server checks the ID token, that `email_verified`
 is true and that the email domain is in `VB_OFFICE32_ALLOWED_DOMAINS`.
 With the Google issuer the `hd` claim is also required and must be allowed,
 which keeps out personal Google accounts registered with a company address.
-The session is a signed `HttpOnly` cookie valid for 12 hours; open
+The session is a signed `HttpOnly` cookie valid for 12 hours that keeps the
+subject, the display name and the email domain, not the address; open
 WebSockets close with 4002 when it expires. Removing a domain from the list
 revokes its sessions on their next request.
 

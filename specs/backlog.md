@@ -13,6 +13,7 @@ Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisõ
 - Logout RP-initiated (`end_session_endpoint`) quando o provedor suportar.
 - Job no CI com `docker buildx build --platform linux/amd64,linux/arm64`.
 - `client_secret_post` para provedores que não aceitem `client_secret_basic` (hoje fixo em Basic).
+- M6 — DNS rebinding no proxy WS do Vite em dev: requisição com `Host`/`Origin` = `evil.com:5173` recebe 101 no `/ws` (o proxy preserva o Host e o check de Origin compara Origin com Host). Em `AUTH=oidc` o upgrade dá 401; em `guest` qualquer um já entra. Só dev; corrigir com `server.allowedHosts` no Vite ou checagem de Host no proxy.
 
 ## Fase 3
 

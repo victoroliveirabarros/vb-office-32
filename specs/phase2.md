@@ -115,21 +115,21 @@ Como colega de time, entro no escritório com minha conta Google Workspace da em
 ## 2b — decisões de segurança
 
 - **Subchaves via HKDF** (`crypto/hkdf`) de `SESSION_KEY` por propósito: `"vb-office-32 session v1"` e `"vb-office-32 oidc-flow v1"`. Cookie de um nunca vale pelo outro (teste).
-- Formato do cookie: `base64url(json).base64url(hmac)`, payload com `v:1` e `exp` validado no servidor. Limite de tamanho no decode. `hmac.Equal`.
-- Cookie de fluxo `vb_office32_oidc`: `{state, nonce, verifier, exp}`, `Path=/auth/`, `MaxAge=600`, apagado no callback (sucesso ou falha). `state`/`nonce` com `crypto/rand.Text()`, verifier com `oauth2.GenerateVerifier()`.
+- Formato do cookie: `base64url(json).base64url(hmac)`, payload com `v:2` e `exp` validado no servidor (`v:1`, que guardava o email, é recusado: sessões antigas viram 401 e relogin). Limite de 3072 bytes no `seal` (erro; no callback vira 500 genérico sem cookie de sessão) e no decode. `hmac.Equal`.
+- Cookie de fluxo `{state, nonce, verifier, exp}`, `Path=/`, `MaxAge=600`, apagado no callback (sucesso ou falha). Nome `__Host-vb_office32_oidc` quando Secure (um subdomínio irmão não consegue plantar cookie `__Host-`, o que fecha login CSRF por cookie tossing); `vb_office32_oidc` em http/localhost. Só o nome do modo atual é lido. `state`/`nonce` com `crypto/rand.Text()`, verifier com `oauth2.GenerateVerifier()`.
 - **go-oidc não valida nonce, `email_verified` nem `hd`**: comparar nonce manualmente em tempo constante.
 - Autorização (`authorize(claims, allowed, requireHD)` pura):
   - `email_verified` aceita bool ou `"true"` (tipo `flexBool`).
-  - Domínio = após último `@`, minúsculas, ∈ ALLOWED_DOMAINS.
+  - Domínio = após último `@`, minúsculas, ∈ ALLOWED_DOMAINS. Email ou `hd` com qualquer byte não-ASCII é recusado antes de baixar a caixa (`strings.ToLower` faz case folding Unicode: o sinal Kelvin `K` vira `k`).
   - **Issuer `https://accounts.google.com` exige `hd` presente** e ∈ ALLOWED_DOMAINS (bloqueia conta Google pessoal criada com email corporativo). Outros issuers: só domínio do email.
 - Respostas do callback: 400 para state/cookie de fluxo inválido ("sessão de login expirada, tente de novo"); 403 para não autorizado; página genérica para `?error=` do provedor. Nunca ecoar parâmetros do provedor. Sempre `303 → /` no sucesso; sem `next`.
-- Sessão: payload `{v, sub, name, email, exp}`; **revalidar domínio em cada `Authenticate`** (remover domínio da config revoga). `Identity.Expires`; sessão WS fecha no `exp` com **4002 `"session expired"`**.
+- Sessão: payload `{v, exp, sub, name, domain, hd}`, sem o email (só o domínio já normalizado; o fallback de nome pela parte local é calculado no callback antes de descartar o email); **revalidar domínio e `hd` em cada `Authenticate`** (remover domínio da config revoga). `Identity.Expires`; sessão WS fecha no `exp` com **4002 `"session expired"`**.
 - `PUBLIC_URL` é a única fonte de scheme/host: ignorar `r.TLS` e `X-Forwarded-*`. Boot valida: `https`, ou `http` só com `localhost`/`127.0.0.1`; sem path (ou `/`), sem query.
-- Discovery OIDC **lazy com retry** (mutex + cache, não `sync.Once`): evita CrashLoop se o sidecar Istio não estiver pronto. `/auth/login` → 503 enquanto falhar. Validação de config segue síncrona no boot.
+- Discovery OIDC **lazy com retry** (`atomic.Pointer` como cache + `TryLock`, não `sync.Once`): evita CrashLoop se o sidecar Istio não estiver pronto. `/auth/login` → 503 enquanto falhar; requisição que chega com discovery em curso e sem cache → 503 imediato, sem enfileirar atrás da I/O de rede. Validação de config segue síncrona no boot.
 - HTTP client de saída com timeout 10 s (via `oidc.ClientContext` / `oauth2.HTTPClient`).
 - Nome do IdP: `strings.ToValidUTF8`, remove `unicode.IsControl` e `unicode.Cf` (bidi), trim, 32 runes; fallback parte local do email. Guest continua 24 ASCII.
 - Headers: `Cache-Control: no-store` em `/auth/*` e `/api/session`; `Referrer-Policy: no-referrer` no callback. Logs só `oidc:<sub>` e motivo da negação; nunca code/token/email.
-- Cookie de sessão com prefixo `__Host-` quando Secure.
+- Cookies de sessão e de fluxo com prefixo `__Host-` quando Secure; ambos `Path=/`.
 - `/api/session`: guest → sempre 401 `{auth:"guest"}`; oidc → 200 `{id,name,auth:"oidc"}` ou 401 `{auth:"oidc"}`. Email não exposto.
 - Botão com texto fixo "Entrar" (provedor genérico).
 - Pacote: handlers Login/Callback/Logout em `internal/auth` (`oidc.go`, `signer.go`, `session.go`); `NewOIDC` não faz rede.
