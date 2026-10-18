@@ -92,11 +92,11 @@ Como colega de time, entro no escritório com minha conta Google Workspace da em
 - **2a (baixo risco):** C, D, E (sem partes de OIDC). Implementar primeiro.
 - **2b (segurança):** A, B + linhas de OIDC no README/deploy.md.
 
-## Dependências (Go 1.25 — não subir para 1.26)
+## Dependências (Go 1.27.2)
 
-- `github.com/coreos/go-oidc/v3@v3.21.0`, `golang.org/x/oauth2@v0.36.0` (v0.37 exige Go 1.26), `github.com/go-jose/go-jose/v4@v4.1.6`.
-- **Proibido `go get -u`.** Não usar `golang.org/x/time` (exige 1.26): token bucket próprio.
-- CI: adicionar `govulncheck`.
+- `github.com/coreos/go-oidc/v3`, `golang.org/x/oauth2`, `github.com/go-jose/go-jose/v4`: sempre a última versão (`go get <mod>@latest`), sem fixação.
+- `golang.org/x/time/rate` é permitido, mas o rate limit do WS continua no token bucket próprio (`internal/realtime/ratelimit.go`); não trocar.
+- CI roda `govulncheck`.
 
 ## 2a — decisões
 

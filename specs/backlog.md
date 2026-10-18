@@ -15,7 +15,6 @@ Escopo e decisões em [`phase2.md`](phase2.md) (seções A e B e "2b — decisõ
 - CSP e demais headers de segurança nas páginas.
 - Logout RP-initiated (`end_session_endpoint`) quando o provedor suportar.
 - Job no CI com `docker buildx build --platform linux/amd64,linux/arm64`.
-- `govulncheck` no CI. Bloqueado: com Go 1.25.14 (último patch da 1.25) o scan aponta 10 vulnerabilidades alcançáveis em `net/http`, `net/textproto` e `crypto/tls`, corrigidas só no Go 1.26.9. Entra junto com a subida para Go 1.26.
 
 ## Fase 3
 
