@@ -26,7 +26,12 @@ jobs:
           go-version-file: go.mod
       - run: docker run -d --name livekit --network host livekit/livekit-server:v1.13 --dev --bind 127.0.0.1
       - run: timeout 60 sh -c 'until curl -fs http://localhost:7880 >/dev/null; do sleep 1; done'
-      - run: go test -count=1 -run LiveKit -v ./internal/media
+      - name: go test (LiveKit)
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -run LiveKit -v ./internal/media | tee out
+          grep -q -- '--- PASS: TestLiveKitValidate' out
         env:
           VB_OFFICE32_LIVEKIT_TEST_URL: http://localhost:7880
       - if: failure()

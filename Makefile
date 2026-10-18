@@ -42,8 +42,8 @@ livekit:
 	docker run --rm --name vb-office-32-livekit --network host $(LIVEKIT_IMAGE) --dev --bind 127.0.0.1
 
 # devidp, the server and Vite together, plus LiveKit when
-# VB_OFFICE32_LIVEKIT_URL is set; Ctrl-C stops them all.
-DEV_OIDC := devidp run web-dev $(if $(VB_OFFICE32_LIVEKIT_URL),livekit)
+# VB_OFFICE32_LIVEKIT_URL points at a local ws:// server; Ctrl-C stops them all.
+DEV_OIDC := devidp run web-dev $(if $(filter ws://localhost ws://localhost:% ws://127.0.0.1 ws://127.0.0.1:%,$(VB_OFFICE32_LIVEKIT_URL)),livekit)
 dev-oidc:
 	@test "$$VB_OFFICE32_AUTH" = oidc && test -n "$$VB_OFFICE32_SESSION_KEY" || \
 		{ echo "dev-oidc: .env needs the OIDC block of .env.example with VB_OFFICE32_SESSION_KEY set"; exit 1; }
