@@ -486,6 +486,22 @@ describe('MediaClient', () => {
     expect(client.state).toBe('connected')
   })
 
+  it('rejoins at once when a removal lands after a fresh grant', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    // The game socket came back while the removal was in flight.
+    client.handle(media('t2'))
+    await vi.advanceTimersByTimeAsync(2_000)
+    room().listener.disconnected('removed')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(room().connects).toEqual(['t1', 't2'])
+    expect(client.state).toBe('connected')
+  })
+
   it('stops for good on a duplicate identity', async () => {
     const client = setup()
     client.handle(welcome([]))
@@ -503,6 +519,8 @@ describe('MediaClient', () => {
     client.handle(welcome([]))
     client.handle(media('t1'))
     await vi.runAllTimersAsync()
+    // The server only removes after 30s off the game socket, without grants.
+    await vi.advanceTimersByTimeAsync(30_000)
     room().listener.disconnected('removed')
     expect(client.state).toBe('waiting')
     await vi.advanceTimersByTimeAsync(60_000)

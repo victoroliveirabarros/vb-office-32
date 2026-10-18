@@ -14,6 +14,12 @@ describe('disconnectAction', () => {
 
   it('waits for a new grant after a removal, even with a valid token', () => {
     expect(disconnectAction('removed', grant(now + 600_000), now)).toBe('wait')
+    expect(disconnectAction('removed', grant(now + 600_000), now, now - 10_000)).toBe('wait')
+  })
+
+  it('retries after a removal that raced a grant younger than 10s', () => {
+    expect(disconnectAction('removed', grant(now + 600_000), now, now - 9_999)).toBe('retry')
+    expect(disconnectAction('removed', grant(now + 30_000), now, now)).toBe('wait')
   })
 
   it('retries with a token that still has more than 30s left', () => {

@@ -88,6 +88,7 @@ type Placed = Tile & { name: string }
 export class MediaClient implements MediaControls {
   private room: MediaRoom | null = null
   private grant: Media | null = null
+  private grantAt = -Infinity
   private link: LinkState = 'idle'
   private attempt = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -207,6 +208,7 @@ export class MediaClient implements MediaControls {
   private onMedia(grant: Media): void {
     if (this.link === 'stopped') return
     this.grant = grant
+    this.grantAt = this.now()
     this.view.setMic(this.mic)
     this.view.setCamera(this.camera)
     if (this.link === 'idle' || this.link === 'waiting') void this.connect()
@@ -248,7 +250,7 @@ export class MediaClient implements MediaControls {
   private lost(kind: DisconnectKind): void {
     this.session++
     this.resetMedia()
-    switch (disconnectAction(kind, this.grant, this.now())) {
+    switch (disconnectAction(kind, this.grant, this.now(), this.grantAt)) {
       case 'stop':
         return this.setLink('stopped')
       case 'wait':
