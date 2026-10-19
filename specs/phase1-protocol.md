@@ -148,29 +148,9 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
   - `floor` (tilelayer)
   - `walls` (tilelayer) — qualquer gid ≠ 0 bloqueia
   - `spawns` (objectgroup) — objetos `point: true`; tile = `floor(x/32), floor(y/32)`
+- Camada opcional `decor` (tilelayer): arte sem colisão (cadeiras, monitores, quadros), desenhada acima de `walls`; o servidor a ignora.
 - Camada opcional `zones` (objectgroup): um retângulo (sem `point`, `ellipse`, `polygon`, `polyline`, `text` ou `gid`; `rotation` 0) por zona, até 255. O `name` nativo do objeto é o nome exibido (1–40 runes, não vazio); propriedades Tiled `string`: `id` (`[a-z0-9-]{1,32}`, único) e `kind` (`meeting` ou `private`). Tile na zona se o centro `(32x+16, 32y+16)` cai em `[x, x+width) × [y, y+height)`. O servidor recusa o mapa no boot se uma zona é inválida, tem `width`/`height` ≤ 0, não cobre nenhum tile, divide tile com outra, ou se um spawn cai numa zona.
-- Tileset embutido no `.tmj`:
-
-```json
-{ "firstgid": 1, "name": "office", "image": "tiles.png",
-  "tilewidth": 32, "tileheight": 32, "columns": 8, "tilecount": 8,
-  "imagewidth": 256, "imageheight": 32 }
-```
-
-- Semântica dos gids (placeholder até tileset Kenney):
-
-| gid | tile | camada típica |
-|---|---|---|
-| 1 | piso claro | floor |
-| 2 | carpete (salas) | floor |
-| 3 | parede | walls |
-| 4 | mesa | walls |
-| 5 | planta | walls |
-| 6 | sofá | walls |
-| 7 | piso de madeira (copa) | floor |
-| 8 | quadro/tela | walls |
-
-- O frontend gera a textura `tiles.png` em runtime (placeholder colorido); servidor nunca lê a imagem.
+- Tileset embutido no `.tmj` (`name: "office"`), atlas `web/public/game/office-tiles.png` de tiles 32 px com 1 px de borda repetida (`margin: 1`, `spacing: 2`, 16 colunas). Mapa e atlas são gerados por `tools/officeart` (`make art`) a partir de uma planta ASCII; o gid só indexa a arte, a colisão é apenas `walls` ≠ 0. O servidor nunca lê a imagem.
 
 ## Spawn e reconexão
 

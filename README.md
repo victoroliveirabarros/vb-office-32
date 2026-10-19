@@ -104,8 +104,9 @@ nothing survives a restart. Message text, recipients and client ids never
 reach the logs. Rules and formats are in the
 [protocol spec](specs/phase1-protocol.md#chat).
 
-In the browser the map tints each zone with its name, and a strip at the
-top left shows the room you are in ("Sala 1 — reunião"). Inside a zone the
+In the browser each zone has its own carpet and a sign with its name on the
+wall above it, the room you are in gets a thin outline, and a strip at the
+top left shows it ("Sala 1 — reunião"). Inside a zone the
 "Perto" tab takes the room's name and warns that only the room sees it; the
 list of people marks who is in your room ("na sala"), near you ("perto") or
 in another room, read from positions and the public map. Clicking someone's
@@ -192,6 +193,27 @@ the real host name and is not sent to the rebound one.
 On SIGTERM the server turns not ready, closes sessions with 1001
 `"server restarting"` and exits within 10 s. Deployment notes are in
 [`docs/deploy.md`](docs/deploy.md).
+
+## Map and art
+
+`maps/office.tmj` and its tile atlas `web/public/game/office-tiles.png` are
+generated; do not edit them by hand. `tools/officeart` reads the floor plan
+in `tools/officeart/office.txt` (three 40×25 character grids: `floor`,
+`solid` for everything that blocks movement, and `decor` for art without
+collision, such as chairs, monitors and pictures), takes only the tiles it
+uses from the Kenney sheets in `art/kenney/` and the sprites drawn as text in
+`art/custom/`, scales them 2× with nearest neighbour to the 32 px tile and
+repeats each tile's edge pixels around it so that none bleeds into the next.
+
+```sh
+make art                                     # rewrites the map and the atlas
+make art ART_FLAGS="-sheet /tmp/officeart"   # also writes index.png (every tile with its gid and source) and map.png
+```
+
+It refuses to change which tiles block movement compared with the current
+map unless run with `-allow-mask-change`, and `go test ./tools/officeart`
+fails while the committed files differ from what it generates. The art is
+CC0; sources, versions and checksums are in [CREDITS.md](CREDITS.md).
 
 ## Development
 
