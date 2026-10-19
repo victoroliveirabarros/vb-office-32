@@ -205,8 +205,9 @@ uses from the Kenney sheets in `art/kenney/` and the sprites drawn as text in
 `art/custom/`, scales them 2× with nearest neighbour to the 32 px tile and
 repeats each tile's edge pixels around it so that none bleeds into the next.
 
-The office is an open room with 15 desks in three islands with seats on
-both sides. Above it sit the meeting room (`reuniao`, a `meeting` zone
+The office is an open room with 15 workstations in three desk islands with
+seats on both sides, each station two tiles wide with a monitor, keyboard and
+something beside it, office chairs, a lounge and a table for six. Above it sit the meeting room (`reuniao`, a `meeting` zone
 where screens can be shared) and the kitchen, which opens wide onto the
 office and is no zone, so talk there goes by distance as in the office; on
 its left the private room for six (`privada`) and on its right the boxing
