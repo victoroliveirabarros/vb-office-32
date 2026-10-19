@@ -9,7 +9,7 @@ import type { Entry, FailReason, Tab, TabKey } from '../chat/state'
 import type { Connection, ConnectionStatus } from '../net/connection'
 import type { ZoneMap } from '../game/zones'
 import type { ServerMessage } from '../net/protocol'
-import { requireElement } from './dom'
+import { icon, requireElement } from './dom'
 
 // Everything user-supplied reaches the page through textContent only.
 
@@ -125,6 +125,7 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
   const tabList = requireElement('chat-tabs', HTMLDivElement)
   const tabPanel = requireElement('chat-tabpanel', HTMLDivElement)
   const peopleToggle = requireElement('chat-people-toggle', HTMLButtonElement)
+  const peopleCount = requireElement('chat-people-count', HTMLSpanElement)
   const people = requireElement('chat-people', HTMLDivElement)
   const peopleList = requireElement('chat-roster', HTMLUListElement)
   const notice = requireElement('chat-notice', HTMLParagraphElement)
@@ -191,6 +192,7 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
           const x = el('span', 'chat-tab-close')
           x.setAttribute('aria-hidden', 'true')
           x.title = 'Fechar conversa'
+          x.append(icon('x'))
           button.append(x)
           button.setAttribute('aria-keyshortcuts', 'Delete')
         }
@@ -267,7 +269,7 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
 
   const renderPeople = () => {
     const list = roster.list()
-    peopleToggle.textContent = `Presentes (${list.length})`
+    peopleCount.textContent = `Presentes (${list.length})`
     const items = list.map((person) => {
       let view = personItems.get(person.id)
       if (!view) {

@@ -31,7 +31,17 @@ async function createRoom(listener: RoomListener): Promise<MediaRoom> {
   return createLiveKitRoom(listener)
 }
 
-function start(hud: Hud, connection: Connection): void {
+// Avatar names are drawn into canvas textures once, so the face must be
+// there first; a slow font only costs the fallback.
+function fontReady(): Promise<void> {
+  const load = document.fonts.load('700 11px "Nunito"').then(
+    () => undefined,
+    () => undefined,
+  )
+  return Promise.race([load, new Promise<void>((resolve) => setTimeout(resolve, 1500))])
+}
+
+async function start(hud: Hud, connection: Connection, font: Promise<void>): Promise<void> {
   const view = createMediaView()
   const media = new MediaClient({ createRoom, view, prefs: storagePrefs })
   view.bind(media)
@@ -55,10 +65,11 @@ function start(hud: Hud, connection: Connection): void {
     picked: (id) => chat.openDirect(id),
   })
 
+  await font
   new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
-    backgroundColor: '#1d1f27',
+    transparent: true,
     pixelArt: true,
     roundPixels: true,
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
@@ -83,20 +94,21 @@ async function loadSession(hud: Hud): Promise<Session> {
 }
 
 async function boot(): Promise<void> {
+  const font = fontReady()
   const hud = createHud()
   const session = await loadSession(hud)
   if (session.status === 'authenticated') {
     showLogout(() => {
       void logout().finally(() => location.assign('/'))
     })
-    start(hud, new Connection(wsUrl(), sessionAlive))
+    await start(hud, new Connection(wsUrl(), sessionAlive), font)
     return
   }
   if (session.auth === 'oidc') {
     showLogin()
     return
   }
-  start(hud, new Connection(wsUrl(await askName())))
+  await start(hud, new Connection(wsUrl(await askName())), font)
 }
 
 void boot()
