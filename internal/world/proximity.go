@@ -23,6 +23,16 @@ func near(d2 int, was bool) bool {
 	return was
 }
 
+// audible tells whether a and b hear each other given whether they did. In a
+// zone only the same zone counts, at any distance and without hysteresis;
+// outside zones the distance does.
+func audible(a, b *player, was bool) bool {
+	if a.zone >= 0 || b.zone >= 0 {
+		return a.zone == b.zone
+	}
+	return near(dist2(a.Pos, b.Pos), was)
+}
+
 func dist2(a, b tilemap.Point) int {
 	dx, dy := a.X-b.X, a.Y-b.Y
 	return dx*dx + dy*dy
@@ -78,10 +88,12 @@ func (s *Space) dropNear(id string) {
 	delete(s.nearBefore, id)
 }
 
-// stepNear re-evaluates the players in check: neighbors beyond nearLeave are
-// dropped and players within nearEnter added. It returns the set of each
-// player whose set differs from the one last returned.
-func (s *Space) stepNear(check []string) map[string][]string {
+// stepNear re-evaluates the players in check: neighbors no longer audible
+// are dropped and newly audible players added. A pair where either side
+// changed zone (zoned) gets no hysteresis, so leaving a zone together does
+// not keep a link the distance alone would not make. It returns the set of
+// each player whose set differs from the one last returned.
+func (s *Space) stepNear(check []string, zoned map[string]string) map[string][]string {
 	if len(check) > 0 {
 		all := make([]*player, 0, len(s.players))
 		for _, p := range s.players {
@@ -89,13 +101,25 @@ func (s *Space) stepNear(check []string) map[string][]string {
 		}
 		for _, id := range check {
 			p := s.players[id]
+			_, changed := zoned[id]
 			for oid := range s.near[id] {
-				if !near(dist2(p.Pos, s.players[oid].Pos), true) {
+				_, otherChanged := zoned[oid]
+				if !audible(p, s.players[oid], !changed && !otherChanged) {
 					s.unlink(id, oid)
 				}
 			}
+			// audible(p, o, false), with the zone of o read only when needed:
+			// most pairs are far apart and outside zones.
+			zone, pos := p.zone, p.Pos
 			for _, o := range all {
-				if o == p || !near(dist2(p.Pos, o.Pos), false) {
+				if o == p {
+					continue
+				}
+				if zone >= 0 {
+					if o.zone != zone {
+						continue
+					}
+				} else if !near(dist2(pos, o.Pos), false) || o.zone >= 0 {
 					continue
 				}
 				if _, ok := s.near[id][o.ID]; !ok {
