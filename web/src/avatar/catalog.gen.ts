@@ -12,9 +12,12 @@ export const ROWS = {
   body: 0,
   pants: 1,
   shirt: 2,
-  hair: [3, 4, 5, 6, 7, 8],
-  acc: [null, 9, 10, 11],
+  hair: [3, 4, 5, 6, 7, 8, 9],
+  acc: [null, 10, 11, 12],
 } as const
+
+// The hair style without hair: the hair color does not show.
+export const BALD = 6
 
 export type Field = 'skin' | 'hair' | 'hairColor' | 'shirt' | 'pants' | 'acc'
 
@@ -58,6 +61,7 @@ export const CATEGORIES: readonly Category[] = [
       { label: 'Longo', colors: [] },
       { label: 'Coque', colors: [] },
       { label: 'Raspado', colors: [] },
+      { label: 'Careca', colors: [] },
     ],
   },
   {

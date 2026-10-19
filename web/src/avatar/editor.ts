@@ -1,4 +1,4 @@
-import { DEFAULT_APPEARANCE, randomAppearance, sameAppearance, withOption } from './appearance'
+import { DEFAULT_APPEARANCE, randomAppearance, sameAppearance, showsHairColor, withOption } from './appearance'
 import type { Appearance } from './appearance'
 import { CATEGORIES } from './catalog.gen'
 import type { Field } from './catalog.gen'
@@ -58,9 +58,9 @@ const label = (field: Field, index: number) => CATEGORIES.find((c) => c.field ==
 
 /** What the preview shows, for screen readers. */
 export function describe(a: Appearance): string {
+  const hair = showsHairColor(a)
+    ? `cabelo ${label('hair', a.hair).toLowerCase()} ${label('hairColor', a.hairColor).toLowerCase()}`
+    : label('hair', a.hair).toLowerCase()
   const acc = a.acc === 0 ? 'sem acessório' : label('acc', a.acc).toLowerCase()
-  return (
-    `Pele ${label('skin', a.skin).toLowerCase()}, cabelo ${label('hair', a.hair).toLowerCase()} ${label('hairColor', a.hairColor).toLowerCase()}, ` +
-    `camisa ${label('shirt', a.shirt).toLowerCase()}, calça ${label('pants', a.pants).toLowerCase()}, ${acc}`
-  )
+  return `Pele ${label('skin', a.skin).toLowerCase()}, ${hair}, camisa ${label('shirt', a.shirt).toLowerCase()}, calça ${label('pants', a.pants).toLowerCase()}, ${acc}`
 }

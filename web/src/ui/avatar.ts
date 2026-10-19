@@ -1,4 +1,4 @@
-import { DEFAULT_APPEARANCE } from '../avatar/appearance'
+import { DEFAULT_APPEARANCE, showsHairColor } from '../avatar/appearance'
 import type { Appearance } from '../avatar/appearance'
 import { CATEGORIES, FRAME_WIDTH } from '../avatar/catalog.gen'
 import type { Category, Field } from '../avatar/catalog.gen'
@@ -81,11 +81,21 @@ export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: T
   let tick = 0
   let facing = 0
   let timer: number | undefined
+  // A bald head has no hair to color: the group is disabled and keeps its
+  // choice for when another style comes back.
+  let hairColors: HTMLFieldSetElement | null = null
+  const noHair = el('span', 'editor-hint', 'Sem cabelo')
+  noHair.hidden = true
 
   for (const cat of CATEGORIES) {
     const group = el('fieldset', 'editor-group')
     const list = el('div', `editor-choices editor-choices-${cat.recolor ? 'colors' : 'styles'}`)
-    group.append(el('legend', 'editor-legend', cat.label), list)
+    const legend = el('legend', 'editor-legend', cat.label)
+    if (cat.field === 'hairColor') {
+      hairColors = group
+      legend.append(' ', noHair)
+    }
+    group.append(legend, list)
     cat.options.forEach((_, i) => {
       const { label, choice } = choiceFor(cat, i)
       choice.input.addEventListener('change', () => {
@@ -127,6 +137,9 @@ export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: T
   function render(): void {
     const look = state.draft
     for (const { field, index, input } of choices) input.checked = look[field] === index
+    const bald = !showsHairColor(look)
+    if (hairColors) hairColors.disabled = bald
+    noHair.hidden = !bald
     preview.setAttribute('aria-label', `Prévia do avatar: ${describe(look)}`)
     if (parts) {
       strip = composeStrip(parts, look)

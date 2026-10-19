@@ -50,14 +50,20 @@ func (f Field) String() string {
 	return fieldNames[f]
 }
 
-// Colors every layer may use besides its keys, as "rrggbb" or "rrggbbaa".
+// Colors the art is drawn with besides the keys, as "rrggbb" or "rrggbbaa".
 const (
-	Outline = "26292e"
-	Eyes    = "26292e"
-	Shoe    = "3a3f4b"
-	Sole    = "26292e"
-	Shadow  = "00000040"
+	Outline    = "26292e"
+	Eyes       = "26292e"
+	EyeShine   = "f5f1ea"
+	Shoe       = "3a3f4b"
+	Sole       = "26292e"
+	Shadow     = "00000040"
+	ScalpShine = "ffffff73"
 )
+
+// Bald is the hair style without hair: its art has none of the hair color
+// keys, only the shine of the scalp, so the hair color does not show.
+const Bald uint8 = 6
 
 // Option is one choice of a category. Colors are "rrggbb": for a recolored
 // category, its palette from light to dark; for an accessory, the colors it
@@ -86,7 +92,8 @@ func (c Category) Keys() []string {
 }
 
 // Fixed returns the colors that are never recolored: outline, eyes, shoes,
-// shadow and the accessories' colors, without repeats.
+// shadow, the shine of the bald scalp and the accessories' colors, without
+// repeats.
 func Fixed() []string {
 	var out []string
 	add := func(colors ...string) {
@@ -96,7 +103,7 @@ func Fixed() []string {
 			}
 		}
 	}
-	add(Outline, Eyes, Shoe, Sole, Shadow)
+	add(Outline, Eyes, EyeShine, Shoe, Sole, Shadow, ScalpShine)
 	for _, o := range catalog[Acc].Options {
 		add(o.Colors...)
 	}
@@ -114,7 +121,7 @@ var catalog = [NumFields]Category{
 		opt("Tom 5", "6e452b", "583621", "402617"),
 	}},
 	{Hair, "Cabelo", false, []Option{
-		opt("Curto"), opt("Topete"), opt("Cacheado"), opt("Longo"), opt("Coque"), opt("Raspado"),
+		opt("Curto"), opt("Topete"), opt("Cacheado"), opt("Longo"), opt("Coque"), opt("Raspado"), opt("Careca"),
 	}},
 	{HairColor, "Cor do cabelo", true, []Option{
 		opt("Preto", "4a4850", "2f2d33", "1c1b1f"),

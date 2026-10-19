@@ -1,5 +1,6 @@
 import { describe as group, expect, it } from 'vitest'
 import { DEFAULT_APPEARANCE, sameAppearance } from './appearance'
+import { BALD } from './catalog.gen'
 import { describe, EditorState } from './editor'
 
 const mine = { skin: 2, hair: 1, hairColor: 3, shirt: 4, pants: 1, acc: 0 }
@@ -68,6 +69,15 @@ group('EditorState', () => {
     expect(state.cancel()).toEqual(mine)
   })
 
+  it('keeps the hair color while bald', () => {
+    const state = opened()
+    state.select('hair', BALD)
+    expect(state.draft).toEqual({ ...mine, hair: BALD })
+    state.select('hair', 3)
+    expect(state.draft).toEqual({ ...mine, hair: 3 })
+    expect(state.draft.hairColor).toBe(mine.hairColor)
+  })
+
   it('reopens on the current look after a cancel', () => {
     const state = opened()
     state.select('hair', 4)
@@ -81,5 +91,6 @@ group('describe', () => {
   it('names every choice in Portuguese', () => {
     expect(describe(mine)).toBe('Pele tom 3, cabelo topete ruivo, camisa vermelho, calça preta, sem acessório')
     expect(describe({ ...mine, acc: 1 })).toMatch(/, óculos$/)
+    expect(describe({ ...mine, hair: BALD })).toBe('Pele tom 3, careca, camisa vermelho, calça preta, sem acessório')
   })
 })

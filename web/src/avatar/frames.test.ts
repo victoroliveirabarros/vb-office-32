@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_APPEARANCE } from './appearance'
-import { CATEGORIES, DIRECTIONS, FRAME_HEIGHT, FRAME_WIDTH, ROWS } from './catalog.gen'
+import { BALD, CATEGORIES, DIRECTIONS, FRAME_HEIGHT, FRAME_WIDTH, ROWS } from './catalog.gen'
 import partsUrl from '../../public/game/avatar-parts.png?inline'
 import { FRAME_COUNT, frameFor, frameIndex, layerRows, layerSwaps, recolor, rowRect, STRIP_WIDTH } from './frames'
 
@@ -35,7 +35,11 @@ describe('atlas layout', () => {
     ])
     expect(layerRows({ ...DEFAULT_APPEARANCE, hair: 5, acc: 3 }).slice(3)).toEqual([
       { layer: 'hair', row: 8 },
-      { layer: 'acc', row: 11 },
+      { layer: 'acc', row: 12 },
+    ])
+    expect(layerRows({ ...DEFAULT_APPEARANCE, hair: BALD, acc: 1 }).slice(3)).toEqual([
+      { layer: 'hair', row: 9 },
+      { layer: 'acc', row: 10 },
     ])
   })
 })

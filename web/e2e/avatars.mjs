@@ -17,7 +17,9 @@ const port = Number(process.env.CDP_PORT ?? 9334)
 mkdirSync(shots, { recursive: true })
 
 // Option counts of the catalog (web/src/avatar/catalog.gen.ts).
-const COUNTS = { skin: 5, hair: 6, hairColor: 8, shirt: 8, pants: 4, acc: 4 }
+const COUNTS = { skin: 5, hair: 7, hairColor: 8, shirt: 8, pants: 4, acc: 4 }
+// The bald hair style: the hair color group is disabled.
+const BALD = 6
 const FIELDS = Object.keys(COUNTS)
 const compact = (a) => FIELDS.map((f) => a[f] ?? 0).join('.')
 
@@ -261,11 +263,12 @@ async function scenario(cdp) {
   await sleep(400)
   await ana.shot('editor-desktop-light-open.png')
 
-  // One step right in every group; the hair color two.
+  // One step right in every group; the hair color two, and the hair style
+  // two when one would make the head bald.
   const want = { ...look0 }
   for (const [i, field] of FIELDS.entries()) {
     if (i > 0) await ana.key('Tab')
-    const steps = field === 'hairColor' ? 2 : 1
+    const steps = field === 'hairColor' || (field === 'hair' && (look0.hair + 1) % COUNTS.hair === BALD) ? 2 : 1
     for (let s = 0; s < steps; s++) await ana.key('ArrowRight')
     want[field] = (look0[field] + steps) % COUNTS[field]
   }
@@ -327,6 +330,52 @@ async function scenario(cdp) {
   const reopened = await ana.eval(`[...document.querySelectorAll('#avatar-options input:checked')].map((i) => i.value).join('.')`)
   check('Cancelar reverts the draft', reopened === compact(want), reopened)
   await ana.key('Escape')
+
+  // Careca: the hair color group is disabled, says why and keeps its choice.
+  await ana.key('Enter')
+  await ana.until(`document.getElementById('avatar-editor').open`)
+  await ana.key('Tab')
+  check('Tab reaches the hair styles', (await ana.active()) === 'avatar-hair', await ana.active())
+  for (let s = 0; s < (BALD - want.hair + COUNTS.hair) % COUNTS.hair; s++) await ana.key('ArrowRight')
+  const colorGroup = `document.querySelector('input[name="avatar-hairColor"]').closest('fieldset')`
+  const bald = await ana.eval(`(() => {
+    const group = ${colorGroup}
+    const hint = group.querySelector('.editor-hint')
+    return {
+      hair: document.querySelector('input[name="avatar-hair"]:checked')?.value,
+      disabled: group.disabled,
+      hint: hint && !hint.hidden && hint.getBoundingClientRect().width > 0 ? hint.textContent : null,
+      kept: document.querySelector('input[name="avatar-hairColor"]:checked')?.value,
+      label: document.getElementById('avatar-preview').getAttribute('aria-label'),
+      thumb: (() => {
+        const c = document.querySelectorAll('input[name="avatar-hair"]')[${BALD}].parentElement.querySelector('canvas')
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+        let n = 0
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++
+        return n
+      })(),
+    }
+  })()`)
+  check('arrows reach Careca', bald.hair === String(BALD), bald)
+  check('Careca disables the hair color, saying why', bald.disabled && bald.hint === 'Sem cabelo', bald)
+  check('the hair color is kept while bald', bald.kept === String(want.hairColor), bald)
+  check('the preview says careca', / careca, /.test(bald.label) && !/cabelo careca/.test(bald.label), bald.label)
+  check('the Careca thumbnail shows the head', bald.thumb > 100, bald.thumb)
+  await ana.key('Tab')
+  check('Tab skips the disabled hair colors', (await ana.active()) === 'avatar-shirt', await ana.active())
+  await sleep(300)
+  await ana.shot('editor-bald-light.png')
+  const editorBox = `(() => { const r = document.getElementById('avatar-editor').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })()`
+  await ana.shot('editor-bald-light-zoom.png', await ana.eval(editorBox))
+  await ana.scheme(true)
+  await ana.shot('editor-bald-dark-zoom.png', await ana.eval(editorBox))
+  await ana.scheme(false)
+  await ana.key('Tab', { shift: true })
+  await ana.key('ArrowLeft')
+  const back = await ana.eval(`({ disabled: (${colorGroup}).disabled, color: document.querySelector('input[name="avatar-hairColor"]:checked')?.value })`)
+  check('another style brings the hair color back', !back.disabled && back.color === String(want.hairColor), back)
+  await ana.key('Escape')
+  await ana.until(`!document.getElementById('avatar-editor').open`)
 
   // Reload: the saved look goes in the URL and comes back in the welcome.
   ana.frames.length = 0

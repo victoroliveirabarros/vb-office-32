@@ -39,9 +39,6 @@ var (
 	bob        = [avatarFrames]int{0, 1, 1}
 )
 
-// eyeShine is the white of the eyes, a fixed color of the body.
-const eyeShine = "f5f1ea"
-
 // avatarRow is one row of the parts atlas: a layer, or one style of it.
 type avatarRow struct {
 	name     string
@@ -59,15 +56,21 @@ func avatarRows(cats []avatar.Category) []avatarRow {
 	with := func(a []string, b ...string) []string { return append(slices.Clone(a), b...) }
 	rows := []avatarRow{
 		{name: "body", file: "body", animated: true, roles: []avatar.Field{avatar.Skin},
-			need: keys(avatar.Skin), allow: with(keys(avatar.Skin), avatar.Outline, avatar.Eyes, eyeShine, avatar.Shadow)},
+			need: keys(avatar.Skin), allow: with(keys(avatar.Skin), avatar.Outline, avatar.Eyes, avatar.EyeShine, avatar.Shadow)},
 		{name: "pants", file: "pants", animated: true, roles: []avatar.Field{avatar.Pants},
 			need: keys(avatar.Pants), allow: with(keys(avatar.Pants), avatar.Outline, avatar.Shoe, avatar.Sole)},
 		{name: "shirt", file: "shirt", animated: true, roles: []avatar.Field{avatar.Shirt, avatar.Skin},
 			need: keys(avatar.Shirt), allow: with(keys(avatar.Shirt), with(keys(avatar.Skin), avatar.Outline)...)},
 	}
 	for i, o := range cats[avatar.Hair].Options {
-		rows = append(rows, avatarRow{name: "hair " + o.Label, file: "hair", variant: i, roles: []avatar.Field{avatar.HairColor},
-			need: keys(avatar.HairColor), allow: with(keys(avatar.HairColor), avatar.Outline)})
+		r := avatarRow{name: "hair " + o.Label, file: "hair", variant: i, roles: []avatar.Field{avatar.HairColor},
+			need: keys(avatar.HairColor), allow: with(keys(avatar.HairColor), avatar.Outline)}
+		if i == int(avatar.Bald) {
+			// No hair: the head is the body's, with only a shine on top.
+			r.need = []string{avatar.ScalpShine}
+			r.allow = r.need
+		}
+		rows = append(rows, r)
 	}
 	for i, o := range cats[avatar.Acc].Options[1:] {
 		rows = append(rows, avatarRow{name: "acc " + o.Label, file: "acc", variant: i,
@@ -110,7 +113,7 @@ func checkKeys(cats []avatar.Category) error {
 			owner[k] = c.Field
 		}
 	}
-	fixed := []string{avatar.Outline, avatar.Eyes, eyeShine, avatar.Shoe, avatar.Sole, avatar.Shadow}
+	fixed := avatar.Fixed()
 	for _, o := range cats[avatar.Acc].Options {
 		fixed = append(fixed, o.Colors...)
 	}
@@ -345,6 +348,9 @@ func catalogTS(cats []avatar.Category) []byte {
 	p("  acc: %s,", tsList(num(acc), false))
 	p("} as const")
 	p("")
+	p("// The hair style without hair: the hair color does not show.")
+	p("export const BALD = %d", avatar.Bald)
+	p("")
 	quoted := make([]string, len(fields))
 	for i, f := range fields {
 		quoted[i] = tsString(f)
@@ -465,6 +471,12 @@ var reviewLooks = []avatar.Appearance{
 	{Skin: 3, Hair: 0, HairColor: 7, Shirt: 7, Pants: 3, Acc: 1},
 	{Skin: 4, Hair: 2, HairColor: 0, Shirt: 1, Pants: 1, Acc: 3},
 	{Skin: 1, Hair: 4, HairColor: 3, Shirt: 2, Pants: 0, Acc: 2},
+	// Bald shows the body's head: every skin, under every accessory.
+	{Skin: 0, Hair: avatar.Bald, HairColor: 0, Shirt: 6, Pants: 1, Acc: 0},
+	{Skin: 1, Hair: avatar.Bald, HairColor: 3, Shirt: 0, Pants: 2, Acc: 1},
+	{Skin: 2, Hair: avatar.Bald, HairColor: 5, Shirt: 4, Pants: 0, Acc: 2},
+	{Skin: 3, Hair: avatar.Bald, HairColor: 1, Shirt: 1, Pants: 3, Acc: 3},
+	{Skin: 4, Hair: avatar.Bald, HairColor: 6, Shirt: 2, Pants: 1, Acc: 0},
 }
 
 var (
@@ -535,7 +547,7 @@ func writeAvatarGIF(path string, o *avatarOutput) error {
 		cellH = 28 * zoom
 		delay = 8
 	)
-	looks := reviewLooks[:6]
+	looks := append(slices.Clone(reviewLooks[:6]), reviewLooks[len(reviewLooks)-1])
 	walk := []int{1, 0, 2, 0}
 	var frames []*image.NRGBA
 	var delays []int

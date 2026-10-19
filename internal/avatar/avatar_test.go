@@ -9,7 +9,7 @@ import (
 )
 
 func TestCounts(t *testing.T) {
-	want := [NumFields]int{5, 6, 8, 8, 4, 4}
+	want := [NumFields]int{5, 7, 8, 8, 4, 4}
 	for f := range Field(NumFields) {
 		if got := Count(f); got != want[f] {
 			t.Errorf("Count(%s) = %d, want %d", f, got, want[f])
@@ -32,8 +32,10 @@ func TestValid(t *testing.T) {
 	}{
 		{Appearance{}, true},
 		{Appearance{4, 5, 7, 7, 3, 3}, true},
+		{Appearance{4, 6, 7, 7, 3, 3}, true},
+		{Appearance{Hair: Bald}, true},
 		{Appearance{Skin: 5}, false},
-		{Appearance{Hair: 6}, false},
+		{Appearance{Hair: 7}, false},
 		{Appearance{HairColor: 8}, false},
 		{Appearance{Shirt: 8}, false},
 		{Appearance{Pants: 4}, false},
@@ -54,6 +56,8 @@ func TestParse(t *testing.T) {
 	}{
 		{"0.0.0.0.0.0", Appearance{}},
 		{"4.5.7.7.3.3", Appearance{4, 5, 7, 7, 3, 3}},
+		{"0.6", Appearance{Hair: Bald}},
+		{"2.6.3.1.0.1", Appearance{2, 6, 3, 1, 0, 1}},
 		{"3", Appearance{Skin: 3}},
 		{"1.2", Appearance{Skin: 1, Hair: 2}},
 		{"1.2.3.4.1", Appearance{1, 2, 3, 4, 1, 0}},
@@ -70,7 +74,7 @@ func TestParse(t *testing.T) {
 func TestParseErrors(t *testing.T) {
 	for _, in := range []string{
 		"", ".", "1.", ".1", "1..2", "0.0.0.0.0.0.0", "0.0.0.0.0.0.", "-1", "+1", "a", "1.x",
-		" 1", "1 ", "0x1", "1_0", "1.5e0", "256", "5", "0.6", "0.0.8", "0.0.0.8", "0.0.0.0.4", "0.0.0.0.0.4",
+		" 1", "1 ", "0x1", "1_0", "1.5e0", "256", "5", "0.7", "0.0.8", "0.0.0.8", "0.0.0.0.4", "0.0.0.0.0.4",
 		"4294967296",
 	} {
 		a, err := Parse(in)
@@ -106,7 +110,7 @@ func TestStringRoundTrip(t *testing.T) {
 		}
 	}
 	walk(0)
-	if n != 5*6*8*8*4*4 {
+	if n != 5*7*8*8*4*4 {
 		t.Errorf("walked %d appearances", n)
 	}
 }
@@ -217,6 +221,20 @@ func TestCatalog(t *testing.T) {
 	for _, f := range []Field{Skin, HairColor, Shirt, Pants} {
 		if !Categories()[f].Recolor {
 			t.Errorf("%s is not recolored", f)
+		}
+	}
+}
+
+func TestBald(t *testing.T) {
+	if l := Categories()[Hair].Options[Bald].Label; l != "Careca" {
+		t.Errorf("hair style %d is %q, want Careca", Bald, l)
+	}
+	if slices.Contains(defaultPools[Hair], Bald) {
+		t.Error("the default looks may be bald")
+	}
+	for _, c := range []string{EyeShine, ScalpShine} {
+		if !slices.Contains(Fixed(), c) {
+			t.Errorf("%s is not a fixed color", c)
 		}
 	}
 }

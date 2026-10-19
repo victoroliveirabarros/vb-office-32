@@ -21,8 +21,8 @@ func TestAvatarGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := o.Parts.Bounds(); b.Dx() != 192 || b.Dy() != 288 {
-		t.Errorf("parts are %dx%d, want 192x288", b.Dx(), b.Dy())
+	if b := o.Parts.Bounds(); b.Dx() != 192 || b.Dy() != 312 {
+		t.Errorf("parts are %dx%d, want 192x312", b.Dx(), b.Dy())
 	}
 	f, err := os.Open(root + "/" + partsFile)
 	if err != nil {
@@ -108,6 +108,39 @@ func TestAvatarFrames(t *testing.T) {
 	if !found {
 		t.Error("composed avatar has no recolored skin")
 	}
+
+	// Bald shows no hair color, and the scalp shines over the skin in
+	// every direction.
+	hairColors := make(map[color.NRGBA]bool)
+	for _, opt := range o.cats[avatar.HairColor].Options {
+		for _, h := range opt.Colors {
+			c, _ := hexColor(h)
+			hairColors[c] = true
+		}
+	}
+	head := map[color.NRGBA]bool{{}: true}
+	for _, h := range append(o.cats[avatar.Skin].Options[2].Colors, avatar.Outline) {
+		c, _ := hexColor(h)
+		head[c] = true
+	}
+	for d := range avatarDirs {
+		for f := range avatarFrames {
+			a := composeAvatar(o.Parts, o.cats, avatar.Appearance{Skin: 2, Hair: avatar.Bald, HairColor: 3}, d, f)
+			shine := false
+			for y := range avatarH {
+				for x := range avatarW {
+					c := a.NRGBAAt(x, y)
+					if hairColors[c] {
+						t.Fatalf("bald %s frame %d: pixel %d,%d has a hair color", avatarDirs[d], f, x, y)
+					}
+					shine = shine || y < 5 && !head[c]
+				}
+			}
+			if !shine {
+				t.Errorf("bald %s frame %d: the scalp does not shine", avatarDirs[d], f)
+			}
+		}
+	}
 }
 
 func cloneImage(img image.Image) *image.NRGBA {
@@ -167,6 +200,27 @@ func TestAvatarErrors(t *testing.T) {
 			replace(sub, "1c1b1f", "2f2d33")
 			s["hair"] = img
 		}, "hair Longo does not use 1c1b1f"},
+		{"hair color on the bald style", func(_ []avatar.Category, s map[string]image.Image) {
+			img := cloneImage(s["hair"])
+			img.SetNRGBA(7, int(avatar.Bald)*avatarH+3, color.NRGBA{0x4a, 0x48, 0x50, 0xff})
+			s["hair"] = img
+		}, "hair Careca pixel 7,147: color 4a4850 is not one of " + avatar.ScalpShine},
+		{"bald style without its shine", func(_ []avatar.Category, s map[string]image.Image) {
+			img := cloneImage(s["hair"])
+			draw.Draw(img, image.Rect(0, int(avatar.Bald)*avatarH, 3*avatarW, int(avatar.Bald+1)*avatarH), image.Transparent, image.Point{}, draw.Src)
+			s["hair"] = img
+		}, "hair Careca does not use " + avatar.ScalpShine},
+		{"only the bald style may go without hair", func(_ []avatar.Category, s map[string]image.Image) {
+			img := cloneImage(s["hair"])
+			draw.Draw(img, image.Rect(0, 0, 3*avatarW, avatarH), image.Transparent, image.Point{}, draw.Src)
+			s["hair"] = img
+		}, "hair Curto does not use 4a4850"},
+		{"the shine only on the bald style", func(_ []avatar.Category, s map[string]image.Image) {
+			img := cloneImage(s["hair"])
+			c, _ := hexColor(avatar.ScalpShine)
+			img.SetNRGBA(5, 2, c)
+			s["hair"] = img
+		}, "hair Curto pixel 5,2: color " + avatar.ScalpShine + " is not one of"},
 		{"bob moves pixels out", func(_ []avatar.Category, s map[string]image.Image) {
 			img := cloneImage(s["hair"])
 			img.SetNRGBA(3, avatarH-1, color.NRGBA{0x26, 0x29, 0x2e, 0xff})
@@ -174,7 +228,7 @@ func TestAvatarErrors(t *testing.T) {
 		}, "hair Curto pixel 3,23: the last row must be empty"},
 		{"wrong size", func(_ []avatar.Category, s map[string]image.Image) {
 			s["hair"] = cloneImage(s["hair"]).SubImage(image.Rect(0, 0, 3*avatarW, 5*avatarH))
-		}, "hair.txt is 48x120, want 48x144"},
+		}, "hair.txt is 48x120, want 48x168"},
 		{"wrong frame width", func(_ []avatar.Category, s map[string]image.Image) {
 			s["body"] = cloneImage(s["body"]).SubImage(image.Rect(0, 0, 3*avatarW-1, 3*avatarH))
 		}, "body.txt is 47x72, want 48x72"},
@@ -212,8 +266,9 @@ func TestCatalogTS(t *testing.T) {
 	ts := string(catalogTS(cats))
 	for _, want := range []string{
 		"export const FRAME_HEIGHT = 24\n",
-		"  hair: [3, 4, 5, 6, 7, 8],\n",
-		"  acc: [null, 9, 10, 11],\n",
+		"  hair: [3, 4, 5, 6, 7, 8, 9],\n",
+		"  acc: [null, 10, 11, 12],\n",
+		"export const BALD = 6\n",
 		"      { label: 'Cáqui', colors: ['c4ae82', '9e8a62'] },\n",
 		"  shirt: ['shirt', 'skin'],\n",
 	} {

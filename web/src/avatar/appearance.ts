@@ -1,5 +1,5 @@
 import { isRecord } from '../guards'
-import { CATEGORIES, FIELDS } from './catalog.gen'
+import { BALD, CATEGORIES, FIELDS } from './catalog.gen'
 import type { Field } from './catalog.gen'
 
 /** One option of each category, by index into the catalog. */
@@ -17,6 +17,17 @@ export function isValid(a: Appearance): boolean {
 
 export function sameAppearance(a: Appearance, b: Appearance): boolean {
   return FIELDS.every((f) => a[f] === b[f])
+}
+
+/** Whether the hair color shows: not on a bald head. */
+export function showsHairColor(a: Appearance): boolean {
+  return a.hair !== BALD
+}
+
+/** Whether a and b look alike: a bald head hides the hair color. */
+export function sameLook(a: Appearance, b: Appearance): boolean {
+  if (showsHairColor(a) || showsHairColor(b)) return sameAppearance(a, b)
+  return sameAppearance({ ...a, hairColor: 0 }, { ...b, hairColor: 0 })
 }
 
 /** The compact form "skin.hair.hairColor.shirt.pants.acc". */
@@ -61,12 +72,12 @@ export function fromWire(v: unknown): Appearance | null {
   return out
 }
 
-/** A random look other than current. */
+/** A random look that does not look like current. */
 export function randomAppearance(current: Appearance, random: () => number = Math.random): Appearance {
   const pick = (f: Field) => Math.floor(random() * optionCount(f)) % optionCount(f)
   const out: Record<Field, number> = { ...DEFAULT_APPEARANCE }
   for (const f of FIELDS) out[f] = pick(f)
-  if (sameAppearance(out, current)) out.shirt = (out.shirt + 1) % optionCount('shirt')
+  if (sameLook(out, current)) out.shirt = (out.shirt + 1) % optionCount('shirt')
   return out
 }
 
