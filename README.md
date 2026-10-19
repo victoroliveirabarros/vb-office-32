@@ -106,14 +106,27 @@ reach the logs. Rules and formats are in the
 
 In the browser each zone has its own carpet and a sign with its name on the
 wall above it, the room you are in gets a thin outline, and a strip at the
-top left shows it ("Ringue de box — privada"). Inside a zone the
-"Perto" tab takes the room's name and warns that only the room sees it; the
-list of people marks who is in your room ("na sala"), near you ("perto") or
-in another room, read from positions and the public map. Clicking someone's
-avatar or name opens a direct conversation; its tab closes with ×, the
-Delete key or "Fechar conversa". Names used by more than one person get a
-short tag derived from their id (`Ana #k3f9`) in the list, the chat and over
-the avatars.
+top left of the map shows it ("Ringue de box — privada"). Inside a zone the
+"Perto" tab takes the room's name and warns that only the room sees it.
+Clicking someone's avatar, or the message button next to their name, opens
+a direct conversation; its tab closes with ×, the Delete key or "Fechar
+conversa". Names used by more than one person get a short tag derived from
+their id (`Ana #k3f9`) in the lists, the chat and over the avatars.
+
+A sidebar on the left holds the panels: **Chat**, **Pessoas** (everyone with
+their avatar's head, where they are, who is talking, a direct message and
+"Ver no mapa"), **Salas** (the zones plus the open office and the kitchen,
+named by the map's `areas` layer, with who is in each and "Ver na visão
+geral"), **Avatar** (the editor) and **Configurações** (theme, microphone,
+camera and audio output while media is on, the default zoom, and Sair with
+OIDC). It shows your head, name and place on top and the latency at the
+bottom, collapses to a rail of icons (remembered in the browser), opens one
+panel at a time beside it over the map, and below 900 px becomes a drawer
+behind a menu button. Alt+1…5 pick its items and Esc closes the panel. "Ver
+no mapa" and "Ver na visão geral" switch to the overview, fitted beside the
+panel, and mark the person or the room for a few seconds. The media bar,
+the video tiles and the zoom stay on the map. Theme and devices are kept in
+`localStorage` only.
 
 ## Login
 

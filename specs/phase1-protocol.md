@@ -169,6 +169,7 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
   - `spawns` (objectgroup) — objetos `point: true`; tile = `floor(x/32), floor(y/32)`
 - Camada opcional `decor` (tilelayer): arte sem colisão (cadeiras, monitores, quadros), desenhada acima de `walls`; o servidor a ignora.
 - Camada opcional `zones` (objectgroup): um retângulo (sem `point`, `ellipse`, `polygon`, `polyline`, `text` ou `gid`; `rotation` 0) por zona, até 255. O `name` nativo do objeto é o nome exibido (1–40 runes, não vazio); propriedades Tiled `string`: `id` (`[a-z0-9-]{1,32}`, único) e `kind` (`meeting` ou `private`). Tile na zona se o centro `(32x+16, 32y+16)` cai em `[x, x+width) × [y, y+height)`. O servidor recusa o mapa no boot se uma zona é inválida, tem `width`/`height` ≤ 0, não cobre nenhum tile, divide tile com outra, ou se um spawn cai numa zona.
+- Camada opcional `areas` (objectgroup): retângulos com nome e propriedade `id`, como os de `zones` mas sem `kind`, que nomeiam partes do piso aberto (`copa`, `escritorio`) para as listas do cliente; o servidor a ignora e ela não muda áudio nem chat.
 - Tileset embutido no `.tmj` (`name: "office"`), atlas `web/public/game/office-tiles.png` de tiles 32 px com 1 px de borda repetida (`margin: 1`, `spacing: 2`, 16 colunas). Mapa e atlas são gerados por `tools/officeart` (`make art`) a partir de uma planta ASCII; o gid só indexa a arte, a colisão é apenas `walls` ≠ 0. O servidor nunca lê a imagem.
 
 ## Spawn e reconexão
