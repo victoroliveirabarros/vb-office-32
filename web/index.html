@@ -15,6 +15,9 @@
       <button id="logout" class="button brand logout" type="button" hidden>
         <svg class="icon" aria-hidden="true"><use href="/icons.svg#log-out" /></svg><span class="logout-text">Sair</span>
       </button>
+      <button id="avatar-edit" class="button brand avatar-edit" type="button" aria-haspopup="dialog" hidden disabled>
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#shirt" /></svg><span class="avatar-edit-text">Personalizar</span>
+      </button>
       <div id="zone" class="pill brand zone-strip" hidden></div>
     </div>
     <div id="zone-status" class="sr-only" role="status"></div>
@@ -78,6 +81,28 @@
         </form>
       </section>
     </aside>
+    <dialog id="avatar-editor" class="editor" aria-labelledby="avatar-editor-title">
+      <form class="editor-form" method="dialog">
+        <div class="editor-header">
+          <h2 id="avatar-editor-title" class="editor-title">Personalizar avatar</h2>
+          <button id="avatar-close" class="icon-button" type="button" aria-label="Fechar sem salvar" title="Fechar sem salvar">
+            <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg>
+          </button>
+        </div>
+        <div class="editor-body">
+          <div class="editor-preview">
+            <canvas id="avatar-preview" class="editor-canvas" width="64" height="96" role="img" aria-label="Prévia do avatar"></canvas>
+            <button id="avatar-turn" class="button button-ghost editor-turn" type="button">Girar</button>
+          </div>
+          <div id="avatar-options" class="editor-options"></div>
+        </div>
+        <div class="editor-actions">
+          <button id="avatar-random" class="button button-ghost" type="button">Aleatório</button>
+          <button id="avatar-cancel" class="button editor-cancel" type="button">Cancelar</button>
+          <button id="avatar-save" class="button button-primary" type="submit" value="save">Salvar</button>
+        </div>
+      </form>
+    </dialog>
     <div id="login" class="overlay" hidden>
       <div class="card">
         <h1 class="card-title">vb-office-32</h1>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeName, parseServerMessage } from './protocol'
+import { encode, normalizeName, parseServerMessage } from './protocol'
 
 describe('parseServerMessage', () => {
   it('parses a welcome', () => {
@@ -104,6 +104,37 @@ describe('parseServerMessage', () => {
     expect(parseServerMessage('{"t":"chatError","d":{"reason":"empty"}}')).toBeNull()
   })
 
+  it('parses players with and without an appearance', () => {
+    const look = { skin: 4, hair: 2, hairColor: 7, shirt: 1, pants: 3, acc: 2 }
+    const ana = { id: 'guest:ana', name: 'Ana', x: 3, y: 4, dir: 'down' }
+    expect(parseServerMessage(JSON.stringify({ t: 'joined', d: { ...ana, appearance: look } }))).toEqual({ t: 'joined', d: { ...ana, appearance: look } })
+    expect(parseServerMessage(JSON.stringify({ t: 'joined', d: ana }))).toEqual({ t: 'joined', d: ana })
+    expect(parseServerMessage(JSON.stringify({ t: 'joined', d: { ...ana, appearance: null } }))).toEqual({ t: 'joined', d: ana })
+    // A broken look costs the look, not the player.
+    expect(parseServerMessage(JSON.stringify({ t: 'joined', d: { ...ana, appearance: { skin: -1 } } }))).toEqual({ t: 'joined', d: ana })
+    const welcome = { selfId: 'guest:ana', mapId: 'office', tickRate: 20, stepMs: 150, players: [{ ...ana, appearance: { skin: 1 } }, { ...ana, id: 'b' }] }
+    expect(parseServerMessage(JSON.stringify({ t: 'welcome', d: welcome }))).toEqual({
+      t: 'welcome',
+      d: { ...welcome, players: [{ ...ana, appearance: { skin: 1, hair: 0, hairColor: 0, shirt: 0, pants: 0, acc: 0 } }, { ...ana, id: 'b' }] },
+    })
+    expect(parseServerMessage(JSON.stringify({ t: 'welcome', d: { ...welcome, players: [{ id: 'x' }] } }))).toBeNull()
+  })
+
+  it('parses appearance changes', () => {
+    const look = { skin: 0, hair: 4, hairColor: 5, shirt: 6, pants: 2, acc: 1 }
+    expect(parseServerMessage(JSON.stringify({ t: 'appearance', d: { id: 'guest:bia', appearance: look } }))).toEqual({
+      t: 'appearance',
+      d: { id: 'guest:bia', appearance: look },
+    })
+    expect(parseServerMessage(JSON.stringify({ t: 'appearance', d: { id: 'b', appearance: { ...look, hair: 40 } } }))).toEqual({
+      t: 'appearance',
+      d: { id: 'b', appearance: { ...look, hair: 0 } },
+    })
+    for (const bad of [{ appearance: look }, { id: 1, appearance: look }, { id: 'b' }, { id: 'b', appearance: { skin: 300 } }, { id: 'b', appearance: [] }]) {
+      expect(parseServerMessage(JSON.stringify({ t: 'appearance', d: bad })), JSON.stringify(bad)).toBeNull()
+    }
+  })
+
   it('rejects malformed messages', () => {
     expect(parseServerMessage('not json')).toBeNull()
     expect(parseServerMessage('{"t":"nope","d":{}}')).toBeNull()
@@ -122,5 +153,12 @@ describe('normalizeName', () => {
     expect(normalizeName('   ')).toBeNull()
     expect(normalizeName('a'.repeat(25))).toBeNull()
     expect(normalizeName('ana!')).toBeNull()
+  })
+})
+
+describe('encode', () => {
+  it('sends an appearance as its fields', () => {
+    const look = { skin: 1, hair: 2, hairColor: 3, shirt: 4, pants: 0, acc: 1 }
+    expect(JSON.parse(encode({ t: 'appearance', d: look }))).toEqual({ t: 'appearance', d: look })
   })
 })

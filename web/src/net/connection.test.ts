@@ -14,12 +14,18 @@ describe('backoffDelay', () => {
 
 describe('wsUrl', () => {
   it('uses wss under https and encodes the name', () => {
-    expect(wsUrl('Ana Maria', { protocol: 'https:', host: 'office.example' })).toBe('wss://office.example/ws?name=Ana%20Maria')
-    expect(wsUrl('bob', { protocol: 'http:', host: 'localhost:5173' })).toBe('ws://localhost:5173/ws?name=bob')
+    expect(wsUrl('Ana Maria', null, { protocol: 'https:', host: 'office.example' })).toBe('wss://office.example/ws?name=Ana%20Maria')
+    expect(wsUrl('bob', undefined, { protocol: 'http:', host: 'localhost:5173' })).toBe('ws://localhost:5173/ws?name=bob')
   })
 
   it('omits the name when the session identifies the user', () => {
-    expect(wsUrl(undefined, { protocol: 'https:', host: 'office.example' })).toBe('wss://office.example/ws')
+    expect(wsUrl(undefined, null, { protocol: 'https:', host: 'office.example' })).toBe('wss://office.example/ws')
+  })
+
+  it('carries the saved look', () => {
+    expect(wsUrl('bob', '1.2.3.4.0.1', { protocol: 'http:', host: 'localhost:5173' })).toBe('ws://localhost:5173/ws?name=bob&av=1.2.3.4.0.1')
+    expect(wsUrl(undefined, '0.0.0.0.0.0', { protocol: 'https:', host: 'office.example' })).toBe('wss://office.example/ws?av=0.0.0.0.0.0')
+    expect(wsUrl('bob', '', { protocol: 'http:', host: 'h' })).toBe('ws://h/ws?name=bob')
   })
 })
 
@@ -144,5 +150,17 @@ describe('Connection', () => {
 
     expect(statuses).toEqual(['connecting', 'reconnecting'])
     expect(FakeSocket.instances).toHaveLength(2)
+  })
+
+  it('asks a url function again on every attempt', async () => {
+    let look = '0.0.0.0.0.0'
+    const conn = new Connection(() => `ws://office.example/ws?av=${look}`)
+    conn.connect()
+    FakeSocket.instances.at(-1)?.open()
+    look = '1.2.3.4.0.1'
+    FakeSocket.instances.at(-1)?.close(1001)
+    await vi.advanceTimersByTimeAsync(600)
+
+    expect(FakeSocket.instances.map((s) => s.url)).toEqual(['ws://office.example/ws?av=0.0.0.0.0.0', 'ws://office.example/ws?av=1.2.3.4.0.1'])
   })
 })

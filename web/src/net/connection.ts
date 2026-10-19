@@ -26,9 +26,13 @@ export function closeAction(code: number): CloseAction {
   }
 }
 
-export function wsUrl(name?: string, loc: Pick<Location, 'protocol' | 'host'> = location): string {
+/** av is the saved look in compact form, applied before the welcome. */
+export function wsUrl(name?: string, av?: string | null, loc: Pick<Location, 'protocol' | 'host'> = location): string {
   const scheme = loc.protocol === 'https:' ? 'wss' : 'ws'
-  const query = name === undefined ? '' : `?name=${encodeURIComponent(name)}`
+  const params: string[] = []
+  if (name !== undefined) params.push(`name=${encodeURIComponent(name)}`)
+  if (av) params.push(`av=${encodeURIComponent(av)}`)
+  const query = params.length === 0 ? '' : `?${params.join('&')}`
   return `${scheme}://${loc.host}/ws${query}`
 }
 
@@ -43,9 +47,11 @@ export class Connection {
   private readonly statusListeners = new Set<Listener<ConnectionStatus>>()
 
   // A refused upgrade (401) reaches the browser as a bare 1006, so a socket
-  // that closes without opening asks checkAuth before retrying.
+  // that closes without opening asks checkAuth before retrying. A url
+  // function is asked again on every attempt, so a reconnect carries what
+  // changed since, like the saved look.
   constructor(
-    private readonly url: string,
+    private readonly url: string | (() => string),
     private readonly checkAuth?: CheckAuth,
   ) {}
 
@@ -67,7 +73,7 @@ export class Connection {
     clearTimeout(this.retryTimer)
     if (this.attempt === 0) this.emitStatus('connecting')
 
-    const socket = new WebSocket(this.url)
+    const socket = new WebSocket(typeof this.url === 'string' ? this.url : this.url())
     this.socket = socket
     let opened = false
 

@@ -437,8 +437,8 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     input.focus()
   })
 
-  input.addEventListener('focus', () => gate.setTyping(true))
-  input.addEventListener('blur', () => gate.setTyping(false))
+  input.addEventListener('focus', () => gate.setTyping('chat', true))
+  input.addEventListener('blur', () => gate.setTyping('chat', false))
   input.addEventListener('input', () => {
     draft = clean(input.value)
     error = ''

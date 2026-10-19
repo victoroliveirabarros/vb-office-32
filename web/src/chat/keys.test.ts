@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atBottom, inputAction, isComposing, isEditable, keepFromGame, shouldFocusChat } from './keys'
+import { atBottom, inputAction, isComposing, isEditable, keepFromGame, shouldFocusChat, TypingOwners } from './keys'
 
 const body = { tagName: 'BODY' }
 const canvas = { tagName: 'CANVAS' }
@@ -72,5 +72,26 @@ describe('keepFromGame', () => {
 
   it('lets other keys through', () => {
     for (const key of ['w', 'a', 's', 'd', 'Enter', 'Escape', 'Tab', ' ']) expect(keepFromGame({ key })).toBe(false)
+  })
+})
+
+describe('TypingOwners', () => {
+  it('keeps the keyboard from the game while anyone holds it', () => {
+    const owners = new TypingOwners()
+    expect(owners.typing).toBe(false)
+    expect(owners.set('chat', true)).toBe(true)
+    expect(owners.set('editor', true)).toBe(false)
+    expect(owners.set('chat', false)).toBe(false)
+    expect(owners.typing).toBe(true)
+    expect(owners.set('editor', false)).toBe(true)
+    expect(owners.typing).toBe(false)
+  })
+
+  it('ignores repeats', () => {
+    const owners = new TypingOwners()
+    owners.set('chat', true)
+    expect(owners.set('chat', true)).toBe(false)
+    expect(owners.set('editor', false)).toBe(false)
+    expect(owners.set('chat', false)).toBe(true)
   })
 })

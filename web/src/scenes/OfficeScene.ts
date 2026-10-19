@@ -1,5 +1,12 @@
 import Phaser from 'phaser'
-import type { TypingGate } from '../chat/keys'
+import type { Appearance } from '../avatar/appearance'
+import { FRAME_HEIGHT, FRAME_WIDTH } from '../avatar/catalog.gen'
+import { composeStrip } from '../avatar/compose'
+import { FRAME_COUNT } from '../avatar/frames'
+import { LookCache } from '../avatar/looks'
+import type { LookStore } from '../avatar/looks'
+import { TypingOwners } from '../chat/keys'
+import type { TypingGate, TypingOwner } from '../chat/keys'
 import { Names } from '../chat/names'
 import { Avatar } from '../entities/Avatar'
 import { Grid } from '../game/grid'
@@ -9,7 +16,7 @@ import type { MapZone } from '../game/zones'
 import type { Connection } from '../net/connection'
 import type { Dir, Player, Pos, ServerMessage, State, Welcome } from '../net/protocol'
 import type { Hud } from '../ui/hud'
-import { MAP_KEY, TILE_SIZE, TILES_KEY, TILESET_NAME } from './assets'
+import { AVATAR_PARTS_KEY, MAP_KEY, TILE_SIZE, TILES_KEY, TILESET_NAME } from './assets'
 
 const PING_INTERVAL_MS = 2000
 const DEFAULT_STEP_MS = 150
@@ -48,7 +55,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private stepMs = DEFAULT_STEP_MS
   private nextStepAt = 0
   private speaking: ReadonlySet<string> = new Set()
-  private typing = false
+  private readonly typing = new TypingOwners()
+  private readonly looks = new LookCache(this.lookStore())
 
   constructor(
     private readonly connection: Connection,
@@ -78,6 +86,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
 
     this.keys = this.createKeys()
     this.applyTyping()
+    // Overlapping avatars: a click picks the one drawn on top.
+    this.input.topOnly = true
 
     const offMessage = this.connection.onMessage((msg) => this.handle(msg))
     const offStatus = this.connection.onStatus((status) => {
@@ -103,14 +113,12 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   // addKey makes Phaser call preventDefault on window keydowns even with the
   // plugin disabled, so typing also turns the global capture off; resetKeys
   // drops keys held when the chat took focus, whose keyup it will swallow.
-  setTyping(on: boolean): void {
-    if (this.typing === on) return
-    this.typing = on
-    this.applyTyping()
+  setTyping(owner: TypingOwner, on: boolean): void {
+    if (this.typing.set(owner, on)) this.applyTyping()
   }
 
   update(time: number): void {
-    if (this.typing) return
+    if (this.typing.typing) return
     if (!this.predictor || !this.connection.isOpen || time < this.nextStepAt) return
     const dir = this.heldDir()
     if (!dir) return
@@ -142,6 +150,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
         return this.highlightZone()
       case 'pong':
         return this.hud.setLatency(performance.now() - msg.d.ts)
+      case 'appearance':
+        return this.avatars.get(msg.d.id)?.setAppearance(msg.d.appearance)
     }
   }
 
@@ -192,9 +202,10 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const existing = this.avatars.get(player.id)
     if (existing) {
       existing.snapTo(player)
+      if (player.appearance) existing.setAppearance(player.appearance)
       return
     }
-    const avatar = new Avatar(this, player)
+    const avatar = new Avatar(this, player, this.looks)
     avatar.setSpeaking(this.speaking.has(player.id))
     const { id } = player
     if (id !== this.selfId) avatar.onPick(() => this.hooks.picked?.(id))
@@ -267,11 +278,28 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     return { up: add(UP, W), down: add(DOWN, S), left: add(LEFT, A), right: add(RIGHT, D) }
   }
 
+  // Looks are composed from the parts atlas into a texture of 12 frames each.
+  private lookStore(): LookStore {
+    return {
+      add: (key: string, look: Appearance) => {
+        const parts = this.textures.get(AVATAR_PARTS_KEY).getSourceImage()
+        if (!(parts instanceof HTMLImageElement || parts instanceof HTMLCanvasElement)) throw new Error('avatar parts not loaded')
+        const texture = this.textures.addCanvas(key, composeStrip(parts, look))
+        if (!texture) throw new Error(`could not add texture ${key}`)
+        for (let i = 0; i < FRAME_COUNT; i++) texture.add(i, 0, i * FRAME_WIDTH, 0, FRAME_WIDTH, FRAME_HEIGHT)
+      },
+      remove: (key: string) => {
+        this.textures.remove(key)
+      },
+    }
+  }
+
   private applyTyping(): void {
     const keyboard = this.input?.keyboard
     if (!keyboard) return
-    keyboard.enabled = !this.typing
-    if (this.typing) keyboard.disableGlobalCapture()
+    const typing = this.typing.typing
+    keyboard.enabled = !typing
+    if (typing) keyboard.disableGlobalCapture()
     else keyboard.enableGlobalCapture()
     keyboard.resetKeys()
   }

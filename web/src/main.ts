@@ -1,5 +1,9 @@
 import Phaser from 'phaser'
 import './style.css'
+import './avatar/swatches.gen.css'
+import { formatAppearance } from './avatar/appearance'
+import { avatarPrefs } from './avatar/prefs'
+import type { TypingGate } from './chat/keys'
 import { toRoom } from './game/zones'
 import { MediaClient } from './media/client'
 import type { MediaRoom, RoomListener } from './media/client'
@@ -12,6 +16,7 @@ import { BootScene } from './scenes/BootScene'
 import { OfficeScene } from './scenes/OfficeScene'
 import { createHud } from './ui/hud'
 import type { Hud } from './ui/hud'
+import { createAvatarEditor } from './ui/avatar'
 import { createChat } from './ui/chat'
 import { askName } from './ui/join'
 import { showLogin, showLogout } from './ui/login'
@@ -41,6 +46,15 @@ function fontReady(): Promise<void> {
   return Promise.race([load, new Promise<void>((resolve) => setTimeout(resolve, 1500))])
 }
 
+const prefs = avatarPrefs()
+
+// The saved look goes in the URL of every attempt, so the server shows it
+// from the welcome on.
+function savedLook(): string | null {
+  const look = prefs.load()
+  return look ? formatAppearance(look) : null
+}
+
 async function start(hud: Hud, connection: Connection, font: Promise<void>): Promise<void> {
   const view = createMediaView()
   const media = new MediaClient({ createRoom, view, prefs: storagePrefs })
@@ -56,9 +70,11 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>): Pro
     if (msg.t === 'zone') hud.setZone(toRoom(msg.d))
   })
 
-  // The chat takes the keyboard from the scene, which opens the chat on a
-  // click on someone's avatar.
-  const chat = createChat(connection, { setTyping: (on) => office.setTyping(on) })
+  // The chat and the avatar editor take the keyboard from the scene, which
+  // opens the chat on a click on someone's avatar.
+  const gate: TypingGate = { setTyping: (owner, on) => office.setTyping(owner, on) }
+  const chat = createChat(connection, gate)
+  createAvatarEditor(connection, prefs, gate)
   const office = new OfficeScene(connection, hud, {
     speakers: media,
     zonesLoaded: (zones) => chat.setZones(zones),
@@ -101,14 +117,15 @@ async function boot(): Promise<void> {
     showLogout(() => {
       void logout().finally(() => location.assign('/'))
     })
-    await start(hud, new Connection(wsUrl(), sessionAlive), font)
+    await start(hud, new Connection(() => wsUrl(undefined, savedLook()), sessionAlive), font)
     return
   }
   if (session.auth === 'oidc') {
     showLogin()
     return
   }
-  await start(hud, new Connection(wsUrl(await askName())), font)
+  const name = await askName()
+  await start(hud, new Connection(() => wsUrl(name, savedLook())), font)
 }
 
 void boot()
