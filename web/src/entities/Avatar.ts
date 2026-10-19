@@ -4,8 +4,8 @@ import type { Dir, Player } from '../net/protocol'
 import { AVATAR_KEY, TILE_SIZE } from '../scenes/assets'
 
 const SPEAKING_COLOR = 0x5ee27a
-const LABEL_BG = 0x2b2420
-const LABEL_ALPHA = 0.78
+const LABEL_BG = 0x00263e
+const LABEL_ALPHA = 0.85
 const LABEL_PAD_X = 5
 const LABEL_PAD_Y = 1
 const LABEL_BOTTOM = -TILE_SIZE / 2 - 2
@@ -26,7 +26,7 @@ export class Avatar extends Phaser.GameObjects.Container {
     this.labelBg = scene.add.graphics()
     this.label = scene.add
       .text(0, LABEL_BOTTOM - LABEL_PAD_Y, player.name, {
-        fontFamily: '"Nunito", system-ui, sans-serif',
+        fontFamily: '"Montserrat", system-ui, sans-serif',
         fontSize: '11px',
         fontStyle: '700',
         color: '#ffffff',

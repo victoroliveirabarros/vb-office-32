@@ -4,23 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <link rel="preload" href="/fonts/nunito-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/montserrat-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <title>vb-office-32</title>
   </head>
   <body>
     <div id="game"></div>
-    <div id="status" class="pill status" hidden></div>
-    <div id="latency" class="pill latency" hidden></div>
+    <div id="status" class="pill brand status" hidden></div>
+    <div id="latency" class="pill brand latency" hidden></div>
     <div class="hud-corner">
-      <button id="logout" class="button button-ghost logout" type="button" hidden>
+      <button id="logout" class="button brand logout" type="button" hidden>
         <svg class="icon" aria-hidden="true"><use href="/icons.svg#log-out" /></svg><span class="logout-text">Sair</span>
       </button>
-      <div id="zone" class="pill zone-strip" hidden></div>
+      <div id="zone" class="pill brand zone-strip" hidden></div>
     </div>
     <div id="zone-status" class="sr-only" role="status"></div>
     <div id="media-tiles" hidden></div>
     <div id="media-stage" hidden><span id="media-stage-label"></span></div>
-    <div id="media-bar" hidden>
+    <div id="media-bar" class="brand" hidden>
       <button id="media-mic" class="media-button" type="button" aria-pressed="false">
         <svg class="icon icon-on" aria-hidden="true"><use href="/icons.svg#mic" /></svg>
         <svg class="icon icon-off" aria-hidden="true"><use href="/icons.svg#mic-off" /></svg>
@@ -41,11 +41,11 @@
     </div>
     <div id="media-audio" hidden></div>
     <aside id="chat" class="chat" aria-label="Chat" hidden>
-      <button id="chat-toggle" class="chat-toggle" type="button" aria-expanded="false" aria-controls="chat-panel">
+      <button id="chat-toggle" class="brand chat-toggle" type="button" aria-expanded="false" aria-controls="chat-panel">
         <svg class="icon" aria-hidden="true"><use href="/icons.svg#message-circle" /></svg><span>Chat</span><span id="chat-toggle-badge" class="chat-badge" aria-hidden="true" hidden></span>
       </button>
       <section id="chat-panel" class="chat-panel" hidden>
-        <div class="chat-header">
+        <div class="brand chat-header">
           <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Conversas"></div>
           <button id="chat-close" class="icon-button chat-close" type="button" aria-label="Fechar chat" title="Fechar chat">
             <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg>

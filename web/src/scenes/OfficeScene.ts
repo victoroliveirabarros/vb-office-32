@@ -28,8 +28,8 @@ export type SceneHooks = {
   picked?(id: string): void
 }
 
-const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x5b8dd6, private: 0x9b6bc8 }
-const SIGN_COLOR = 0x2b2420
+const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x014c8b, private: 0x7a3fb0 }
+const SIGN_DOT = 0xfdc339
 const SIGN_HEIGHT = 16
 
 type ZoneView = { zone: MapZone; outline: Phaser.GameObjects.Graphics; sign: Phaser.GameObjects.Container }
@@ -213,7 +213,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       const { x0, y0, x1, y1 } = zone.tiles
       const [x, y, w, h] = [x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE]
       const color = ZONE_COLORS[zone.kind]
-      const outline = this.add.graphics().setDepth(4).lineStyle(2, color, 0.4).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
+      const outline = this.add.graphics().setDepth(4).lineStyle(2, color, 0.7).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
       const sign = this.zoneSign(zone.name, color).setPosition(x + 6, Math.max(SIGN_HEIGHT / 2, y - TILE_SIZE / 2))
       return { zone, outline, sign }
     })
@@ -223,7 +223,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private zoneSign(name: string, color: number): Phaser.GameObjects.Container {
     const text = this.add
       .text(16, 0, name, {
-        fontFamily: '"Nunito", system-ui, sans-serif',
+        fontFamily: '"Montserrat", system-ui, sans-serif',
         fontSize: '10px',
         fontStyle: '700',
         color: '#ffffff',
@@ -234,9 +234,9 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const width = Math.ceil(text.width) + 22
     const plate = this.add
       .graphics()
-      .fillStyle(SIGN_COLOR, 0.78)
-      .fillRoundedRect(0, -SIGN_HEIGHT / 2, width, SIGN_HEIGHT, SIGN_HEIGHT / 2)
-      .fillStyle(color, 1)
+      .fillStyle(color, 0.92)
+      .fillRoundedRect(0, -SIGN_HEIGHT / 2, width, SIGN_HEIGHT, 4)
+      .fillStyle(SIGN_DOT, 1)
       .fillCircle(9, 0, 3)
     return this.add.container(0, 0, [plate, text]).setDepth(4)
   }

@@ -34,7 +34,7 @@ async function createRoom(listener: RoomListener): Promise<MediaRoom> {
 // Avatar names are drawn into canvas textures once, so the face must be
 // there first; a slow font only costs the fallback.
 function fontReady(): Promise<void> {
-  const load = document.fonts.load('700 11px "Nunito"').then(
+  const load = document.fonts.load('700 11px "Montserrat"').then(
     () => undefined,
     () => undefined,
   )
