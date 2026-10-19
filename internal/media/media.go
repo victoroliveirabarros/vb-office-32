@@ -82,7 +82,9 @@ type videoGrant struct {
 }
 
 // Issue grants identity, shown as name, the right to join room, publish its
-// microphone and camera and subscribe to others.
+// microphone, camera and screen and subscribe to others. Who may receive each
+// track is up to its publisher (subscription permissions), so the token never
+// carries recorder, which bypasses them.
 func (c *Client) Issue(identity, name, room string, now time.Time) (Grant, error) {
 	exp := now.Add(TTL)
 	token, err := sign(claims{
@@ -96,7 +98,7 @@ func (c *Client) Issue(identity, name, room string, now time.Time) (Grant, error
 			Room:              room,
 			RoomJoin:          true,
 			CanPublish:        true,
-			CanPublishSources: []string{"microphone", "camera"},
+			CanPublishSources: []string{"microphone", "camera", "screen_share"},
 			CanSubscribe:      true,
 		},
 	}, c.secret)

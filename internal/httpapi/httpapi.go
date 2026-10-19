@@ -96,7 +96,7 @@ func securityHeaders(opts Options, next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), display-capture=()")
+		h.Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), display-capture=(self)")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		if opts.HSTS {
 			h.Set("Strict-Transport-Security", "max-age=31536000")

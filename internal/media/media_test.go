@@ -43,7 +43,7 @@ func TestIssue(t *testing.T) {
 	}
 
 	want := `{"iss":"key","sub":"oidc:42","name":"Zé","nbf":1767268800,"iat":1767268800,"exp":1767269400,` +
-		`"video":{"room":"office","roomJoin":true,"canPublish":true,"canPublishSources":["microphone","camera"],` +
+		`"video":{"room":"office","roomJoin":true,"canPublish":true,"canPublishSources":["microphone","camera","screen_share"],` +
 		`"canSubscribe":true,"canPublishData":false,"canUpdateOwnMetadata":false}}`
 	payload := decode(t, parts[1])
 	if payload != want {
