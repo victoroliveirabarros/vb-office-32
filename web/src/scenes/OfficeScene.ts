@@ -28,9 +28,11 @@ export type SceneHooks = {
   picked?(id: string): void
 }
 
-const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x7fa3d9, private: 0xc79be8 }
+const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x5b8dd6, private: 0x9b6bc8 }
+const SIGN_COLOR = 0x2b2420
+const SIGN_HEIGHT = 16
 
-type ZoneView = { zone: MapZone; parts: Phaser.GameObjects.Graphics[] }
+type ZoneView = { zone: MapZone; outline: Phaser.GameObjects.Graphics; sign: Phaser.GameObjects.Container }
 
 export class OfficeScene extends Phaser.Scene implements TypingGate {
   private grid!: Grid
@@ -61,6 +63,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     if (!tileset) throw new Error(`tileset "${TILESET_NAME}" missing from map`)
     map.createLayer('floor', tileset)?.setDepth(0)
     map.createLayer('walls', tileset)?.setDepth(2)
+    map.createLayer('decor', tileset)?.setDepth(3)
 
     const cached: { data: unknown } = this.cache.tilemap.get(MAP_KEY)
     this.grid = Grid.fromTiled(cached.data)
@@ -203,33 +206,47 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     this.avatars.forEach((avatar, id) => avatar.setLabel(this.labels.label(id, this.names.get(id) ?? '')))
   }
 
-  // A light tint under the furniture and a border over it, stronger for our
-  // room.
+  // The carpet already marks each room: our room gets a thin outline, and
+  // every room a sign with its name on the wall above it.
   private drawZones(zones: ZoneMap): void {
     this.zoneViews = zones.zones.map((zone) => {
       const { x0, y0, x1, y1 } = zone.tiles
       const [x, y, w, h] = [x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE]
       const color = ZONE_COLORS[zone.kind]
-      const tint = this.add.graphics().setDepth(1).fillStyle(color, 0.12).fillRect(x, y, w, h)
-      const edge = this.add.graphics().setDepth(3).lineStyle(2, color, 0.6).strokeRect(x + 1, y + 1, w - 2, h - 2)
-      this.add
-        .text(x + 6, y + 4, zone.name, {
-          fontFamily: 'system-ui, sans-serif',
-          fontSize: '10px',
-          color: '#ffffff',
-          stroke: '#1d1f27',
-          strokeThickness: 3,
-          resolution: 4,
-        })
-        .setAlpha(0.85)
-        .setDepth(3)
-      return { zone, parts: [tint, edge] }
+      const outline = this.add.graphics().setDepth(4).lineStyle(2, color, 0.4).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
+      const sign = this.zoneSign(zone.name, color).setPosition(x + 6, Math.max(SIGN_HEIGHT / 2, y - TILE_SIZE / 2))
+      return { zone, outline, sign }
     })
     this.highlightZone()
   }
 
+  private zoneSign(name: string, color: number): Phaser.GameObjects.Container {
+    const text = this.add
+      .text(16, 0, name, {
+        fontFamily: '"Nunito", system-ui, sans-serif',
+        fontSize: '10px',
+        fontStyle: '700',
+        color: '#ffffff',
+        resolution: 4,
+      })
+      .setOrigin(0, 0.5)
+    text.texture.setFilter(Phaser.Textures.FilterMode.LINEAR)
+    const width = Math.ceil(text.width) + 22
+    const plate = this.add
+      .graphics()
+      .fillStyle(SIGN_COLOR, 0.78)
+      .fillRoundedRect(0, -SIGN_HEIGHT / 2, width, SIGN_HEIGHT, SIGN_HEIGHT / 2)
+      .fillStyle(color, 1)
+      .fillCircle(9, 0, 3)
+    return this.add.container(0, 0, [plate, text]).setDepth(4)
+  }
+
   private highlightZone(): void {
-    for (const { zone, parts } of this.zoneViews) for (const part of parts) part.setAlpha(zone.id === this.zoneId ? 1 : 0.5)
+    for (const { zone, outline, sign } of this.zoneViews) {
+      const here = zone.id === this.zoneId
+      outline.setVisible(here)
+      sign.setAlpha(here ? 1 : 0.8)
+    }
   }
 
   private showSpeaking(ids: ReadonlySet<string>): void {
