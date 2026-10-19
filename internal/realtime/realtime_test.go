@@ -29,12 +29,23 @@ func startServer(t *testing.T) string {
 
 func startServerWith(t *testing.T, authn Authenticator, maxSessions int) string {
 	t.Helper()
-	m, err := tilemap.LoadFile("testdata/small.tmj")
+	return serve(t, authn, maxSessions, nil)
+}
+
+func serve(t *testing.T, authn Authenticator, maxSessions int, mi Media) string {
+	t.Helper()
+	return serveMap(t, "small", authn, maxSessions, mi, slog.New(slog.DiscardHandler))
+}
+
+// serveMap serves testdata/<mapID>.tmj.
+func serveMap(t *testing.T, mapID string, authn Authenticator, maxSessions int, mi Media, log *slog.Logger) string {
+	t.Helper()
+	m, err := tilemap.LoadFile("testdata/" + mapID + ".tmj")
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := slog.New(slog.DiscardHandler)
-	hub := NewHub(NewRoom(DefaultSpace, "small", world.NewSpace(m), log))
+	room := NewRoom(DefaultSpace, mapID, world.NewSpace(m), mi, log)
+	hub := NewHub(room)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

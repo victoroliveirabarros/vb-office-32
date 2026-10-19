@@ -4,31 +4,53 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>vb-office-32</title>
-    <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f27; font-family: system-ui, sans-serif; }
-      #game { position: fixed; inset: 0; }
-      .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(10, 11, 16, 0.85); z-index: 10; }
-      .overlay[hidden] { display: none; }
-      #join-form { display: grid; gap: 8px; padding: 24px; background: #2a2d38; border-radius: 8px; color: #eee; min-width: 260px; }
-      #join-form input, #join-form button { font: inherit; padding: 8px; border-radius: 4px; border: 1px solid #555; }
-      #join-form button { background: #4f6d99; color: #fff; border: 0; cursor: pointer; }
-      #join-error { color: #ff8a8a; font-size: 13px; margin: 0; }
-      .panel { display: grid; gap: 12px; padding: 24px; background: #2a2d38; border-radius: 8px; color: #eee; min-width: 260px; text-align: center; }
-      .panel p { margin: 0; }
-      .button { display: block; font: inherit; padding: 8px; border-radius: 4px; background: #4f6d99; color: #fff; text-decoration: none; border: 0; cursor: pointer; }
-      #logout { position: fixed; top: 8px; left: 8px; padding: 4px 8px; font: 12px monospace; z-index: 5; }
-      #logout[hidden] { display: none; }
-      .badge { position: fixed; top: 8px; padding: 4px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); color: #fff; font: 12px monospace; z-index: 5; }
-      .badge[hidden] { display: none; }
-      #status { left: 50%; transform: translateX(-50%); }
-      #latency { right: 8px; }
-    </style>
   </head>
   <body>
     <div id="game"></div>
     <div id="status" class="badge" hidden></div>
     <div id="latency" class="badge" hidden></div>
     <button id="logout" class="button" type="button" hidden>Sair</button>
+    <div id="media-tiles" hidden></div>
+    <div id="media-bar" hidden>
+      <button id="media-mic" class="media-button" type="button" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /><path class="slash" d="M3 3l18 18" /></svg>
+      </button>
+      <button id="media-camera" class="media-button" type="button" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /><path class="slash" d="M3 3l18 18" /></svg>
+      </button>
+      <button id="media-unlock" class="button" type="button" hidden>Ativar áudio</button>
+      <span id="media-note" hidden></span>
+    </div>
+    <div id="media-audio" hidden></div>
+    <aside id="chat" class="chat" aria-label="Chat" hidden>
+      <button id="chat-toggle" class="chat-toggle" type="button" aria-expanded="false" aria-controls="chat-panel">
+        <span>Chat</span><span id="chat-toggle-badge" class="chat-badge" aria-hidden="true" hidden></span>
+      </button>
+      <section id="chat-panel" class="chat-panel" hidden>
+        <div class="chat-header">
+          <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Conversas"></div>
+          <button id="chat-close" class="chat-close" type="button" aria-label="Fechar chat" title="Fechar chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <button id="chat-people-toggle" class="chat-people-toggle" type="button" aria-expanded="false" aria-controls="chat-people">Presentes</button>
+        <div id="chat-people" class="chat-people" hidden>
+          <ul id="chat-roster" class="chat-roster" aria-label="Presentes"></ul>
+        </div>
+        <div id="chat-tabpanel" class="chat-tabpanel" role="tabpanel">
+          <p id="chat-notice" class="chat-notice"></p>
+          <div id="chat-log" class="chat-log" role="log" aria-label="Mensagens" aria-busy="false" tabindex="0"></div>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" class="chat-input" rows="2" dir="auto" aria-label="Mensagem" aria-describedby="chat-status" placeholder="Mensagem (Enter envia, Shift+Enter quebra linha)"></textarea>
+          <div class="chat-meta">
+            <span id="chat-status" class="chat-status" role="status"></span>
+            <span id="chat-count" class="chat-count" aria-hidden="true">0/500</span>
+            <button id="chat-send" class="button chat-send" type="submit">Enviar</button>
+          </div>
+        </form>
+      </section>
+    </aside>
     <div id="login" class="overlay" hidden>
       <div class="panel">
         <p>vb-office-32</p>

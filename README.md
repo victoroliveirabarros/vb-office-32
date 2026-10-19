@@ -2,13 +2,16 @@
 
 A small virtual office: a tile map where teammates walk around in
 real time. The Go server is authoritative; the browser client lives in `web/`.
+Proximity audio and video go through a self-hosted LiveKit server: the Go
+server decides who is near whom and hands out tokens, and the browser
+subscribes only to those players.
 
 ## Run
 
 ```sh
 cp .env.example .env   # make loads it; it logs in through the development IdP
 sed -i "s|^VB_OFFICE32_SESSION_KEY=.*|VB_OFFICE32_SESSION_KEY=$(openssl rand -base64 32)|" .env
-make dev-oidc          # devidp on :9000, server on :8080, Vite on :5173
+make dev-oidc          # devidp :9000, server :8080, Vite :5173, LiveKit :7880 (Docker)
 ```
 
 Open http://localhost:5173 and click "Entrar". For guest mode instead,
@@ -36,11 +39,64 @@ and no `$`.
 | `VB_OFFICE32_OIDC_CLIENT_ID`     | with oidc | —                             | no     | OAuth client ID. |
 | `VB_OFFICE32_OIDC_CLIENT_SECRET` | with oidc | —                             | yes    | OAuth client secret, sent with HTTP Basic (`client_secret_basic`). |
 | `VB_OFFICE32_ALLOWED_DOMAINS`    | with oidc | —                             | no     | Comma-separated email domains allowed in, e.g. `example.com,example.org`. |
-| `VB_OFFICE32_SESSION_KEY`        | with oidc | —                             | yes    | Base64 of at least 32 random bytes (`openssl rand -base64 32`). Signs the session and login cookies; changing it logs everyone out. |
+| `VB_OFFICE32_SESSION_KEY`        | with oidc | —                             | yes    | Base64 of at least 32 random bytes (`openssl rand -base64 32`). Signs the session and login cookies; changing it alone logs everyone out. |
+| `VB_OFFICE32_SESSION_KEY_PREVIOUS` | no      | —                             | yes    | The key before a rotation, same format. Cookies it signed are still accepted; new ones always use `VB_OFFICE32_SESSION_KEY`. See [rotation](docs/deploy.md#rotating-the-session-key). |
+| `VB_OFFICE32_LIVEKIT_URL`        | for media | —                             | no     | LiveKit URL the browser connects to, `wss://host[:port]` without path; `ws` only for `localhost`/`127.0.0.1`. |
+| `VB_OFFICE32_LIVEKIT_API_KEY`    | for media | —                             | no     | LiveKit API key (it goes in every token, so it is not secret). |
+| `VB_OFFICE32_LIVEKIT_API_SECRET` | for media | —                             | yes    | LiveKit API secret; under 32 characters only logs a warning, for the development `secret`. |
 
 Invalid values stop the server at boot with an error naming the variable,
 never its value. The OIDC provider itself is contacted on the first login,
-not at boot.
+not at boot. The three LiveKit variables go together: all of them turn media
+on, none turns it off, and a partial set is an error.
+
+## Audio and video
+
+With the LiveKit variables set, each player gets a LiveKit token right after
+`welcome` (`media`). Media or not, the server sends each player the set of
+players within earshot (`nearby`): a pair becomes near at 4 tiles and stops
+at more than 5. Tokens last 10 minutes and
+are reissued about every 5 (the server checks once a minute); the server
+never logs them. A player whose WebSocket stays closed for 30 seconds is
+removed from the LiveKit room through its API, since LiveKit would otherwise
+keep renewing that connection; reconnecting within the 30 seconds keeps the
+call. Anyone who joins the LiveKit room without a WebSocket here is removed
+as soon as LiveKit reports it (webhook on `POST /livekit/webhook`), and once a
+minute the server also lists the room as a safety net. Network, cost and a
+minimal LiveKit configuration are in [`docs/livekit.md`](docs/livekit.md).
+
+In the browser the LiveKit SDK loads only when the first `media` arrives.
+The microphone turns on at join (a mute is remembered in `localStorage`),
+the camera starts off, and the buttons at the bottom toggle both. Everyone
+in `nearby` is heard, louder when closer (full volume up to 1 tile, down to
+20% at 4); the cameras of the 8 closest show as small tiles at the top, and
+a ring marks who is speaking. When the browser blocks autoplay an "Ativar
+áudio" button appears.
+
+```sh
+make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networking
+```
+
+`.env.example` carries the matching variables, and `make dev-oidc` also
+starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is `ws://localhost` or
+`ws://127.0.0.1`. In guest mode run
+`make livekit`, `make run` and `make web-dev`.
+
+## Chat
+
+Players chat with everyone in the space, with whoever is `nearby` at the
+moment of sending, or directly with one player who is online (otherwise the
+sender gets `offline`; nothing is queued). The server cleans the text
+(invalid UTF-8, control and bidi/format characters, trailing spaces, runs of
+blank lines; emoji sequences and the Persian ZWNJ survive), refuses it when
+empty or over 500 characters or 20 lines instead of truncating, and allows
+each connection 5 chats in a row and then one every 2 seconds
+(`rate_limited`, without closing the connection). The sender's name comes
+from its session. The last 100 `everyone` messages are kept in memory and
+sent to whoever joins; `nearby` and direct messages are never kept, and
+nothing survives a restart. Message text, recipients and client ids never
+reach the logs. Rules and formats are in the
+[protocol spec](specs/phase1-protocol.md#chat).
 
 ## Login
 
@@ -78,6 +134,32 @@ Its defaults match `.env.example`: issuer `http://localhost:9000`, client
 Change them with flags (`go run ./cmd/devidp -h`), `DEVIDP_FLAGS` or the
 `DEVIDP_*` variables, keeping the server's variables in step.
 
+## Security headers
+
+Every response carries a `Content-Security-Policy` that allows scripts,
+styles, media and fonts from the page's own origin only (no inline code;
+audio and video play from `MediaStream`s), images also from `data:`/`blob:`,
+connections to the page's origin and to the LiveKit URL (`ws(s)://` and
+`http(s)://`), forms to the page's origin only (login is a link, not a
+form), and no framing. They also get
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`Permissions-Policy` (camera and microphone for the page only, no
+geolocation or screen capture) and `Cross-Origin-Opener-Policy:
+same-origin`; `Strict-Transport-Security: max-age=31536000` is added when
+`VB_OFFICE32_PUBLIC_URL` is https, which only exists in oidc mode, so guest
+mode never sends HSTS.
+
+The Vite dev server does not send these headers: check CSP changes against
+the build served by the Go server (`make web-build` and `make run`, then
+open http://localhost:8080). In dev, Vite answers only for `localhost` and
+`127.0.0.1` and refuses `/ws` upgrades for any other `Host`, which blocks
+DNS rebinding through its proxy. The Go server reached directly (port 8080,
+without Vite) does not check `Host`: in guest mode a rebound page sees
+matching `Host` and `Origin` and can open `/ws` under any name, which is
+harmless because guest mode lets anyone do that anyway (development only).
+In oidc mode rebinding gains nothing, since the session cookie belongs to
+the real host name and is not sent to the rebound one.
+
 ## Endpoints
 
 | Path       | Purpose |
@@ -88,6 +170,7 @@ Change them with flags (`go run ./cmd/devidp -h`), `DEVIDP_FLAGS` or the
 | `/api/session` | Current user: 200 `{id, name, auth}` or 401 `{auth}`. |
 | `/auth/login`, `/auth/callback`, `POST /auth/logout` | OIDC login (oidc mode only). |
 | `/maps/*`  | Map files. |
+| `POST /livekit/webhook` | LiveKit webhooks, signed with the API secret (with media only). |
 | `/`        | Frontend. |
 
 On SIGTERM the server turns not ready, closes sessions with 1001
@@ -101,6 +184,10 @@ make test        # go test -race ./...
 make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
+make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -chat"   # bots also chat, reports echo latency
+
+# token, removal and reconciliation checks against a running LiveKit (make livekit)
+VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime
 ```
 
 The wire protocol and map format are specified in

@@ -3,6 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -107,7 +110,12 @@ func TestRun(t *testing.T) {
 		t.Errorf("dial while draining: res = %v, err = %v, want 503", res, err)
 	}
 
-	_, _, err = conn.Read(context.Background())
+	// nearby and chatHistory follow welcome.
+	for {
+		if _, _, err = conn.Read(context.Background()); err != nil {
+			break
+		}
+	}
 	var ce websocket.CloseError
 	if !errors.As(err, &ce) || ce.Code != websocket.StatusGoingAway || ce.Reason != "server restarting" {
 		t.Errorf("close on shutdown = %v, want 1001 \"server restarting\"", err)
@@ -137,6 +145,10 @@ func TestRunOIDC(t *testing.T) {
 	if res.StatusCode != http.StatusUnauthorized || string(body) != `{"auth":"oidc"}`+"\n" {
 		t.Errorf("/api/session = %d %s", res.StatusCode, body)
 	}
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self';") ||
+		!strings.Contains(csp, "connect-src 'self';") || res.Header.Get("Strict-Transport-Security") != "" {
+		t.Errorf("headers = %v, want form-action 'self' only and no HSTS over http", res.Header)
+	}
 	if got := status(t, "http://"+addr+"/auth/login"); got != http.StatusServiceUnavailable {
 		t.Errorf("/auth/login with provider down = %d, want 503", got)
 	}
@@ -145,6 +157,27 @@ func TestRunOIDC(t *testing.T) {
 		t.Errorf("dial without session: res = %v, err = %v, want 401", res, err)
 	}
 
+	cancel()
+	if err := <-errc; err != nil {
+		t.Errorf("run: %v", err)
+	}
+}
+
+func TestRunHSTS(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	vars := oidcEnv()
+	vars["VB_OFFICE32_PUBLIC_URL"] = "https://office.example"
+	addr, errc := start(t, ctx, vars)
+
+	res, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if got := res.Header.Get("Strict-Transport-Security"); got != "max-age=31536000" {
+		t.Errorf("Strict-Transport-Security = %q with an https public URL", got)
+	}
 	cancel()
 	if err := <-errc; err != nil {
 		t.Errorf("run: %v", err)
@@ -218,12 +251,13 @@ func TestLoadConfig(t *testing.T) {
 
 func TestLoadConfigErrorsNameVariableNotValue(t *testing.T) {
 	_, err := loadConfig(env(map[string]string{
-		"VB_OFFICE32_MAX_SESSIONS":    "s3cr3t-sessions",
-		"VB_OFFICE32_LOG_LEVEL":       "s3cr3t-level",
-		"VB_OFFICE32_PUBLIC_URL":      "http://s3cr3t.example",
-		"VB_OFFICE32_OIDC_ISSUER":     "ftp://s3cr3t.example",
-		"VB_OFFICE32_ALLOWED_DOMAINS": "s3cr3t@example.com",
-		"VB_OFFICE32_SESSION_KEY":     "s3cr3t-key",
+		"VB_OFFICE32_MAX_SESSIONS":         "s3cr3t-sessions",
+		"VB_OFFICE32_LOG_LEVEL":            "s3cr3t-level",
+		"VB_OFFICE32_PUBLIC_URL":           "http://s3cr3t.example",
+		"VB_OFFICE32_OIDC_ISSUER":          "ftp://s3cr3t.example",
+		"VB_OFFICE32_ALLOWED_DOMAINS":      "s3cr3t@example.com",
+		"VB_OFFICE32_SESSION_KEY":          "s3cr3t-key",
+		"VB_OFFICE32_SESSION_KEY_PREVIOUS": "s3cr3t-previous",
 	}))
 	if err == nil {
 		t.Fatal("loadConfig succeeded, want error")
@@ -231,7 +265,8 @@ func TestLoadConfigErrorsNameVariableNotValue(t *testing.T) {
 	msg := err.Error()
 	for _, want := range []string{
 		"VB_OFFICE32_MAX_SESSIONS", "VB_OFFICE32_LOG_LEVEL", "VB_OFFICE32_PUBLIC_URL", "VB_OFFICE32_OIDC_ISSUER",
-		"VB_OFFICE32_ALLOWED_DOMAINS", "VB_OFFICE32_SESSION_KEY", "VB_OFFICE32_OIDC_CLIENT_ID", "VB_OFFICE32_OIDC_CLIENT_SECRET",
+		"VB_OFFICE32_ALLOWED_DOMAINS", "VB_OFFICE32_SESSION_KEY:", "VB_OFFICE32_SESSION_KEY_PREVIOUS:",
+		"VB_OFFICE32_OIDC_CLIENT_ID", "VB_OFFICE32_OIDC_CLIENT_SECRET",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not name %s", msg, want)
@@ -253,8 +288,14 @@ func TestLoadConfigOIDC(t *testing.T) {
 	o := cfg.oidc
 	if cfg.auth != "oidc" || o.PublicURL != "https://office.example" || o.Issuer != "https://accounts.google.com" ||
 		o.ClientID != "client" || o.ClientSecret != "secret" || len(o.SessionKey) != 32 ||
-		!slices.Equal(o.AllowedDomains, []string{"example.com", "example.org"}) {
+		!slices.Equal(o.AllowedDomains, []string{"example.com", "example.org"}) || o.PreviousSessionKey != nil {
 		t.Errorf("oidc config = %+v", o)
+	}
+
+	vars["VB_OFFICE32_SESSION_KEY_PREVIOUS"] = "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA="
+	cfg, err = loadConfig(env(vars))
+	if err != nil || string(cfg.oidc.PreviousSessionKey) != "fedcba9876543210fedcba9876543210" {
+		t.Errorf("previous key = %q, %v", cfg.oidc.PreviousSessionKey, err)
 	}
 }
 
@@ -297,9 +338,16 @@ func TestLoadConfigOIDCValues(t *testing.T) {
 		{"VB_OFFICE32_PUBLIC_URL", "office.example", false},
 		{"VB_OFFICE32_PUBLIC_URL", "https://", false},
 		{"VB_OFFICE32_PUBLIC_URL", "ws://localhost:5173", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://:443", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:0", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:65536", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:", false},
+		{"VB_OFFICE32_PUBLIC_URL", "https://office.example:65535", true},
 		{"VB_OFFICE32_OIDC_ISSUER", "https://cognito-idp.us-east-1.amazonaws.com/pool", true},
 		{"VB_OFFICE32_OIDC_ISSUER", "http://issuer.example", false},
 		{"VB_OFFICE32_OIDC_ISSUER", "https://issuer.example?tenant=1", false},
+		{"VB_OFFICE32_OIDC_ISSUER", "https://:443/pool", false},
+		{"VB_OFFICE32_OIDC_ISSUER", "https://issuer.example:99999", false},
 		{"VB_OFFICE32_ALLOWED_DOMAINS", "example.com,example.org", true},
 		{"VB_OFFICE32_ALLOWED_DOMAINS", "@example.com", false},
 		{"VB_OFFICE32_ALLOWED_DOMAINS", "example", false},
@@ -307,6 +355,10 @@ func TestLoadConfigOIDCValues(t *testing.T) {
 		{"VB_OFFICE32_SESSION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\n", true},
 		{"VB_OFFICE32_SESSION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZQ==", false},
 		{"VB_OFFICE32_SESSION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY", false},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "", true},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA=", true},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZQ==", false},
+		{"VB_OFFICE32_SESSION_KEY_PREVIOUS", "not base64", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
@@ -321,4 +373,209 @@ func TestLoadConfigOIDCValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+func livekitEnv() map[string]string {
+	return map[string]string{
+		"VB_OFFICE32_AUTH":               "guest",
+		"VB_OFFICE32_LIVEKIT_URL":        "ws://localhost:7880",
+		"VB_OFFICE32_LIVEKIT_API_KEY":    "devkey",
+		"VB_OFFICE32_LIVEKIT_API_SECRET": "secret",
+	}
+}
+
+func TestRunWithMedia(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr, errc := start(t, ctx, livekitEnv())
+
+	res, err := http.Get("http://" + addr + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self' ws://localhost:7880 http://localhost:7880;") ||
+		!strings.Contains(csp, "form-action 'self';") {
+		t.Errorf("Content-Security-Policy = %q, want LiveKit in connect-src", csp)
+	}
+
+	conn, _, err := websocket.Dial(ctx, "ws://"+addr+"/ws?name=ana", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	var types []string
+	var grant struct {
+		URL       string `json:"url"`
+		Token     string `json:"token"`
+		ExpiresAt int64  `json:"expiresAt"`
+	}
+	for range 3 {
+		_, msg, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var env struct {
+			T string          `json:"t"`
+			D json.RawMessage `json:"d"`
+		}
+		if err := json.Unmarshal(msg, &env); err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, env.T)
+		if env.T == "media" {
+			if err := json.Unmarshal(env.D, &grant); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !slices.Equal(types, []string{"welcome", "media", "nearby"}) {
+		t.Errorf("first messages = %v, want welcome, media, nearby", types)
+	}
+	if grant.URL != "ws://localhost:7880" || strings.Count(grant.Token, ".") != 2 {
+		t.Errorf("media = %+v", grant)
+	}
+	if left := time.Until(time.UnixMilli(grant.ExpiresAt)); left < 9*time.Minute || left > 10*time.Minute {
+		t.Errorf("grant expires in %v, want 10m", left)
+	}
+
+	const event = `{"event":"room_started","room":{"name":"office"}}`
+	for token, want := range map[string]int{"forged": http.StatusUnauthorized, webhookToken(event): http.StatusOK} {
+		req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/livekit/webhook", strings.NewReader(event))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", token)
+		req.Header.Set("Content-Type", "application/webhook+json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != want {
+			t.Errorf("webhook with token %.10s = %d, want %d", token, res.StatusCode, want)
+		}
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Errorf("run: %v", err)
+	}
+}
+
+func TestLoadConfigLiveKit(t *testing.T) {
+	cfg, err := loadConfig(env(livekitEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (livekitConfig{"ws://localhost:7880", "devkey", "secret"}); cfg.livekit != want {
+		t.Errorf("livekit = %+v, want %+v", cfg.livekit, want)
+	}
+	cfg, err = loadConfig(env(map[string]string{"VB_OFFICE32_AUTH": "guest"}))
+	if err != nil || cfg.livekit != (livekitConfig{}) {
+		t.Errorf("without variables: livekit = %+v, err = %v, want media off", cfg.livekit, err)
+	}
+
+	for _, key := range []string{"VB_OFFICE32_LIVEKIT_URL", "VB_OFFICE32_LIVEKIT_API_KEY", "VB_OFFICE32_LIVEKIT_API_SECRET"} {
+		t.Run("without "+key, func(t *testing.T) {
+			vars := livekitEnv()
+			vars["VB_OFFICE32_LIVEKIT_API_SECRET"] = "s3cr3t"
+			delete(vars, key)
+			_, err := loadConfig(env(vars))
+			if err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("err = %v, want one naming %s", err, key)
+			}
+			if strings.Contains(err.Error(), "s3cr3t") {
+				t.Errorf("error %q echoes the secret", err)
+			}
+		})
+	}
+
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{"wss://media.example", "wss://media.example"},
+		{"wss://media.example:7880/", "wss://media.example:7880"},
+		{"ws://localhost:7880", "ws://localhost:7880"},
+		{"ws://127.0.0.1:7880", "ws://127.0.0.1:7880"},
+		{"ws://media.example", ""},
+		{"https://media.example", ""},
+		{"wss://media.example/rtc", ""},
+		{"wss://media.example?x=1", ""},
+		{"wss://user:s3cr3t@media.example", ""},
+		{"media.example", ""},
+		{"wss://:443", ""},
+		{"wss://media.example:99999", ""},
+		{"wss://media.example:0", ""},
+		{"wss://media.example:443", "wss://media.example:443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			vars := livekitEnv()
+			vars["VB_OFFICE32_LIVEKIT_URL"] = tt.value
+			cfg, err := loadConfig(env(vars))
+			if tt.want == "" {
+				if err == nil || !strings.Contains(err.Error(), "VB_OFFICE32_LIVEKIT_URL") || strings.Contains(err.Error(), "s3cr3t") {
+					t.Errorf("err = %v, want one naming VB_OFFICE32_LIVEKIT_URL without its value", err)
+				}
+				return
+			}
+			if err != nil || cfg.livekit.url != tt.want {
+				t.Errorf("url = %q, err = %v, want %q", cfg.livekit.url, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunWarnsOnUnrotatedPreviousKey(t *testing.T) {
+	for _, previous := range []string{"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA="} {
+		vars := oidcEnv()
+		vars["VB_OFFICE32_SESSION_KEY_PREVIOUS"] = previous
+		vars["VB_OFFICE32_ADDR"] = "127.0.0.1:0"
+		vars["VB_OFFICE32_MAPS_DIR"] = "../../maps"
+		vars["VB_OFFICE32_WEB_DIR"] = t.TempDir()
+		ctx, cancel := context.WithCancel(context.Background())
+		pr, pw := io.Pipe()
+		errc := make(chan error, 1)
+		go func() {
+			errc <- run(ctx, env(vars), pw)
+			pw.Close()
+		}()
+		var warned bool
+		sc := bufio.NewScanner(pr)
+		for sc.Scan() {
+			var line struct{ Level, Msg string }
+			if json.Unmarshal(sc.Bytes(), &line) != nil {
+				continue
+			}
+			if line.Level == "WARN" && strings.Contains(line.Msg, "SESSION_KEY_PREVIOUS") {
+				warned = true
+			}
+			if line.Msg == "listening" {
+				cancel()
+			}
+		}
+		cancel()
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+		if same := previous == vars["VB_OFFICE32_SESSION_KEY"]; warned != same {
+			t.Errorf("previous key equal to the current: %v, warned: %v", same, warned)
+		}
+	}
+}
+
+// webhookToken signs body for devkey and secret as LiveKit does.
+func webhookToken(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	now := time.Now().Unix()
+	claims, _ := json.Marshal(map[string]any{
+		"iss": "devkey", "nbf": now, "iat": now, "exp": now + 300,
+		"sha256": base64.StdEncoding.EncodeToString(sum[:]),
+	})
+	signed := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + base64.RawURLEncoding.EncodeToString(claims)
+	mac := hmac.New(sha256.New, []byte("secret"))
+	mac.Write([]byte(signed))
+	return signed + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

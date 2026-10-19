@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,9 +23,12 @@ func (fakeOIDC) Authenticate(r *http.Request) (auth.Identity, error) {
 	return auth.Identity{}, errors.New("no session")
 }
 
-func (fakeOIDC) Login(w http.ResponseWriter, _ *http.Request)    { w.WriteHeader(http.StatusFound) }
-func (fakeOIDC) Callback(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusSeeOther) }
-func (fakeOIDC) Logout(w http.ResponseWriter, _ *http.Request)   { w.WriteHeader(http.StatusNoContent) }
+func (fakeOIDC) Login(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusFound) }
+func (fakeOIDC) Callback(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Referrer-Policy", "same-origin")
+	w.WriteHeader(http.StatusSeeOther)
+}
+func (fakeOIDC) Logout(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
 
 func TestHandler(t *testing.T) {
 	maps, web := t.TempDir(), t.TempDir()
@@ -123,5 +127,99 @@ func TestHandler(t *testing.T) {
 				t.Errorf("cache control = %q, want no-store", got)
 			}
 		})
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	web := t.TempDir()
+	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	ready := func() bool { return true }
+	const base = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
+		"media-src 'self'; connect-src 'self'%s; font-src 'self'; object-src 'none'; base-uri 'none'; " +
+		"form-action 'self'; frame-ancestors 'none'"
+
+	tests := []struct {
+		name string
+		opts Options
+		csp  string
+		hsts bool
+	}{
+		{"guest without media", Options{}, fmt.Sprintf(base, ""), false},
+		{
+			"oidc with media over https",
+			Options{
+				OIDC:       fakeOIDC{},
+				ConnectSrc: []string{"wss://media.example", "https://media.example"},
+				HSTS:       true,
+			},
+			fmt.Sprintf(base, " wss://media.example https://media.example"),
+			true,
+		},
+	}
+	for _, tt := range tests {
+		tt.opts.WS, tt.opts.Ready, tt.opts.MapsDir, tt.opts.WebDir = ws, ready, t.TempDir(), web
+		h := NewHandler(tt.opts)
+		for _, path := range []string{"/", "/index.html", "/missing.js", "/api/session", "/healthz", "/maps/office.tmj"} {
+			t.Run(tt.name+" "+path, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+				want := map[string]string{
+					"Content-Security-Policy":    tt.csp,
+					"X-Content-Type-Options":     "nosniff",
+					"Referrer-Policy":            "no-referrer",
+					"Permissions-Policy":         "camera=(self), microphone=(self), geolocation=(), display-capture=()",
+					"Cross-Origin-Opener-Policy": "same-origin",
+					"Strict-Transport-Security":  "",
+				}
+				if tt.hsts {
+					want["Strict-Transport-Security"] = "max-age=31536000"
+				}
+				for k, v := range want {
+					if got := rec.Header().Get(k); got != v {
+						t.Errorf("%s = %q, want %q", k, got, v)
+					}
+				}
+			})
+		}
+	}
+
+	t.Run("handlers override", func(t *testing.T) {
+		h := NewHandler(Options{WS: ws, Ready: ready, MapsDir: t.TempDir(), WebDir: web, OIDC: fakeOIDC{}})
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/callback", nil))
+		if got := rec.Header().Get("Referrer-Policy"); got != "same-origin" {
+			t.Errorf("Referrer-Policy = %q, want the handler's own", got)
+		}
+		if rec.Header().Get("Content-Security-Policy") == "" {
+			t.Error("no Content-Security-Policy on an auth page")
+		}
+	})
+}
+
+func TestMediaWebhookRoute(t *testing.T) {
+	hook := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	opts := Options{Ready: func() bool { return true }, MapsDir: t.TempDir(), WebDir: t.TempDir()}
+	without := NewHandler(opts)
+	opts.MediaWebhook = hook
+	with := NewHandler(opts)
+
+	for _, tt := range []struct {
+		h      http.Handler
+		method string
+		want   int
+	}{
+		{with, http.MethodPost, http.StatusAccepted},
+		{with, http.MethodGet, http.StatusNotFound},
+		{without, http.MethodPost, http.StatusMethodNotAllowed},
+	} {
+		rec := httptest.NewRecorder()
+		// LiveKit sends neither Origin nor Sec-Fetch-Site.
+		tt.h.ServeHTTP(rec, httptest.NewRequest(tt.method, "/livekit/webhook", nil))
+		if rec.Code != tt.want {
+			t.Errorf("%s /livekit/webhook = %d, want %d", tt.method, rec.Code, tt.want)
+		}
 	}
 }

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
 	"github.com/victoroliveirabarros/vb-office-32/internal/httpapi"
+	"github.com/victoroliveirabarros/vb-office-32/internal/media"
 	"github.com/victoroliveirabarros/vb-office-32/internal/realtime"
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
@@ -28,6 +31,7 @@ import (
 const (
 	mapID           = "office"
 	shutdownTimeout = 10 * time.Second
+	minSecretLen    = 32
 )
 
 func main() {
@@ -56,6 +60,9 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	)
 	if cfg.auth == authOIDC {
 		cfg.oidc.Log = log
+		if cfg.oidc.PreviousSessionKey != nil && bytes.Equal(cfg.oidc.PreviousSessionKey, cfg.oidc.SessionKey) {
+			log.Warn("VB_OFFICE32_SESSION_KEY_PREVIOUS equals VB_OFFICE32_SESSION_KEY; set the new key before deploying a rotation")
+		}
 		o, err := auth.NewOIDC(cfg.oidc)
 		if err != nil {
 			return fmt.Errorf("oidc: %w", err)
@@ -65,15 +72,37 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 		log.Warn("guest auth: anyone can join under any name; use only for development")
 	}
 
+	var (
+		mi         realtime.Media
+		lkClient   *media.Client
+		connectSrc []string
+	)
+	if lk := cfg.livekit; lk.url != "" {
+		lkClient = media.NewClient(lk.url, lk.apiKey, lk.apiSecret)
+		mi = lkClient
+		connectSrc = []string{lk.url, media.HTTPURL(lk.url)}
+		if len(lk.apiSecret) < minSecretLen {
+			log.Warn("VB_OFFICE32_LIVEKIT_API_SECRET is shorter than 32 characters; use a long random secret outside development")
+		}
+	}
+
 	var ready atomic.Bool
-	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), log))
+
+	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), mi, log))
 	ws := realtime.NewHandler(hub, authn, cfg.allowedOrigins, cfg.maxSessions, log)
+	var webhook http.Handler
+	if lkClient != nil {
+		webhook = realtime.NewWebhookHandler(hub, lkClient, log)
+	}
 	srv := httpapi.NewServer(httpapi.NewHandler(httpapi.Options{
-		WS:      ws,
-		Ready:   ready.Load,
-		MapsDir: cfg.mapsDir,
-		WebDir:  cfg.webDir,
-		OIDC:    login,
+		WS:           ws,
+		Ready:        ready.Load,
+		MapsDir:      cfg.mapsDir,
+		WebDir:       cfg.webDir,
+		OIDC:         login,
+		ConnectSrc:   connectSrc,
+		MediaWebhook: webhook,
+		HSTS:         strings.HasPrefix(cfg.oidc.PublicURL, "https://"),
 	}))
 	srv.ErrorLog = slog.NewLogLogger(log.Handler(), slog.LevelWarn)
 
@@ -81,7 +110,7 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions)
+	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions, "media", mi != nil)
 
 	// The hub outlives ctx so sessions are closed only after readiness has
 	// turned false, while the listener still answers /readyz with 503.

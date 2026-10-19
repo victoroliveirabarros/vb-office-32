@@ -81,8 +81,62 @@ Notes:
   checked by the email domain alone; make sure the provider only issues
   verified emails for domains it controls.
 - Sessions last 12 hours. Removing a domain from the list revokes its
-  sessions on their next request; rotating `VB_OFFICE32_SESSION_KEY` logs
-  everyone out.
+  sessions on their next request; replacing `VB_OFFICE32_SESSION_KEY`
+  without the rotation below logs everyone out.
+
+### Rotating the session key
+
+`VB_OFFICE32_SESSION_KEY_PREVIOUS` (optional, secret, same format as the
+key) keeps cookies signed with the old key valid for reading, while every
+new cookie is signed with the current key.
+
+1. Set `VB_OFFICE32_SESSION_KEY_PREVIOUS` to the current key.
+2. Set `VB_OFFICE32_SESSION_KEY` to a new one (`openssl rand -base64 32`)
+   and deploy. Nobody is logged out, and logins in progress finish.
+3. After 12 hours (the session lifetime) every cookie signed with the old
+   key has expired: remove `VB_OFFICE32_SESSION_KEY_PREVIOUS` and deploy.
+
+To log everyone out instead (a leaked key), replace the key without setting
+the previous one.
+
+## Audio and video (optional)
+
+Proximity audio and video need a LiveKit server next to this one; see
+[`livekit.md`](livekit.md) for its network, configuration and cost. Point
+vb-office-32 at it with:
+
+| Variable | Example | Secret |
+|---|---|---|
+| `VB_OFFICE32_LIVEKIT_URL` | `wss://media.example.com` | no |
+| `VB_OFFICE32_LIVEKIT_API_KEY` | the key configured in LiveKit | no |
+| `VB_OFFICE32_LIVEKIT_API_SECRET` | the matching secret | yes |
+
+Set all three or none. Besides signing tokens, vb-office-32 calls the
+LiveKit room service at the same host over `http(s)`: `RemoveParticipant`
+30 seconds after a player's WebSocket closes for good or as soon as someone
+without a WebSocket joins, and `ListParticipants` once a minute as a safety
+net. The pod needs egress to that URL as well as the browser. A failed
+removal is logged as a warning and retried once; a failed list is logged and
+tried again a minute later. Deliver the secret like the other secrets above.
+
+LiveKit must also post its webhooks to `POST <server>/livekit/webhook`
+(`webhook.urls` and `webhook.api_key` in `livekit.yaml`, see
+[`livekit.md`](livekit.md#removal)). The route checks LiveKit's signature
+(HS256 with the API secret, SHA-256 of the body) and answers 401 otherwise,
+so it may go through the public ingress; an internal URL works as well when
+LiveKit runs in the same network. Without webhooks the periodic list still
+removes intruders, only up to a minute later.
+
+## Security headers
+
+All responses carry CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+`Permissions-Policy` and `Cross-Origin-Opener-Policy` (see the
+[README](../README.md#security-headers)); the CSP already allows the LiveKit
+URL from the configuration. HSTS (`max-age=31536000`) is sent only when
+`VB_OFFICE32_PUBLIC_URL` is https, that is in oidc mode; serve production in
+oidc mode behind https.
+Proxies in front must not strip or replace these headers, and a page served
+from another host needs that host in the CSP, which is not configurable.
 
 ## Port and probes
 
@@ -106,7 +160,9 @@ Restarts forget last positions; players respawn at the spawn points.
 
 On SIGTERM the server:
 
-1. turns `/readyz` to 503 and refuses new `/ws` connections with 503;
+1. turns `/readyz` to 503 and refuses new `/ws` connections with 503
+   (pending LiveKit removals are dropped: clients reconnect to the next
+   process and keep their call);
 2. closes every session with WebSocket close 1001 `"server restarting"` and
    waits up to 5 s for the close handshakes, keeping the listener open;
 3. stops the HTTP server and exits, 10 s at most after the signal.

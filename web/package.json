@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "livekit-client": "^2.23.0",
     "phaser": "^4.2.1"
   },
   "devDependencies": {

@@ -20,6 +20,14 @@ type Options struct {
 	WebDir  string
 	// OIDC enables login; nil means guest mode.
 	OIDC OIDC
+	// ConnectSrc lists the origins the page may connect to besides its own,
+	// such as the media server.
+	ConnectSrc []string
+	// MediaWebhook, when set, receives the media server's webhooks.
+	MediaWebhook http.Handler
+	// HSTS sends Strict-Transport-Security; set it only when the public URL
+	// is https.
+	HSTS bool
 }
 
 type OIDC interface {
@@ -59,9 +67,42 @@ func NewHandler(opts Options) http.Handler {
 		mux.HandleFunc("GET /auth/callback", opts.OIDC.Callback)
 		mux.HandleFunc("POST /auth/logout", opts.OIDC.Logout)
 	}
+	if opts.MediaWebhook != nil {
+		mux.Handle("POST /livekit/webhook", opts.MediaWebhook)
+	}
 	mux.Handle("GET /maps/", http.StripPrefix("/maps/", tiledJSON(http.FileServer(filesOnly{http.Dir(opts.MapsDir)}))))
 	mux.Handle("GET /", http.FileServer(filesOnly{http.Dir(opts.WebDir)}))
-	return http.NewCrossOriginProtection().Handler(mux)
+	return securityHeaders(opts, http.NewCrossOriginProtection().Handler(mux))
+}
+
+// securityHeaders sets headers every response gets. Handlers may still
+// override them, as the auth pages do with their own.
+func securityHeaders(opts Options, next http.Handler) http.Handler {
+	csp := strings.Join([]string{
+		"default-src 'self'",
+		"script-src 'self'",
+		"style-src 'self'",
+		"img-src 'self' data: blob:",
+		"media-src 'self'",
+		strings.Join(append([]string{"connect-src 'self'"}, opts.ConnectSrc...), " "),
+		"font-src 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'self'",
+		"frame-ancestors 'none'",
+	}, "; ")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", csp)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), display-capture=()")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		if opts.HSTS {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeText(w http.ResponseWriter, status int, body string) {

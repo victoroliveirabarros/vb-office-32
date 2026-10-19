@@ -1,0 +1,17 @@
+{
+  "orientation": "orthogonal",
+  "infinite": false,
+  "width": 12,
+  "height": 1,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "layers": [
+    { "name": "floor", "type": "tilelayer", "width": 12, "height": 1, "data": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] },
+    { "name": "walls", "type": "tilelayer", "width": 12, "height": 1, "data": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { "name": "spawns", "type": "objectgroup", "objects": [
+      { "point": true, "x": 16, "y": 16 },
+      { "point": true, "x": 112, "y": 16 },
+      { "point": true, "x": 368, "y": 16 }
+    ] }
+  ]
+}

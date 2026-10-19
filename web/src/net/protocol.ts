@@ -7,9 +7,17 @@ export type Pos = { id: string; x: number; y: number; dir: Dir }
 
 export type MoveInput = { seq: number; dir: Dir }
 
+export type ChatScope = 'everyone' | 'nearby' | 'direct'
+
+export type ChatErrorReason = 'rate_limited' | 'too_long' | 'empty' | 'offline' | 'invalid'
+
+/** cid correlates the server's echo or chatError with the send. */
+export type ChatSend = { cid: string; scope: ChatScope; to?: string; text: string }
+
 export type ClientMessage =
   | { t: 'move'; d: MoveInput }
   | { t: 'ping'; d: { ts: number } }
+  | { t: 'chat'; d: ChatSend }
 
 export type Welcome = {
   selfId: string
@@ -21,12 +29,37 @@ export type Welcome = {
 
 export type State = { tick: number; ack: number; players: Pos[] }
 
+/** LiveKit connection; expiresAt is unix milliseconds. */
+export type Media = { url: string; token: string; expiresAt: number }
+
+/** Full set of players in earshot of the recipient, sorted, without itself. */
+export type Nearby = { ids: string[] }
+
+/** at is unix milliseconds; to only on direct; cid only on the sender's echo. */
+export type Chat = {
+  id: string
+  at: number
+  from: string
+  fromName: string
+  scope: ChatScope
+  to?: string
+  text: string
+  cid?: string
+}
+
+export type ChatError = { cid: string; reason: ChatErrorReason }
+
 export type ServerMessage =
   | { t: 'welcome'; d: Welcome }
   | { t: 'joined'; d: Player }
   | { t: 'left'; d: { id: string } }
   | { t: 'state'; d: State }
   | { t: 'pong'; d: { ts: number } }
+  | { t: 'media'; d: Media }
+  | { t: 'nearby'; d: Nearby }
+  | { t: 'chat'; d: Chat }
+  | { t: 'chatHistory'; d: { messages: Chat[] } }
+  | { t: 'chatError'; d: ChatError }
 
 export const CLOSE_REPLACED = 4001
 export const CLOSE_EXPIRED = 4002
@@ -64,6 +97,18 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return isState(d) ? { t: 'state', d } : null
     case 'pong':
       return isNumber(d.ts) ? { t: 'pong', d: { ts: d.ts } } : null
+    case 'media':
+      return isMedia(d) ? { t: 'media', d: { url: d.url, token: d.token, expiresAt: d.expiresAt } } : null
+    case 'nearby':
+      return isNearby(d) ? { t: 'nearby', d: { ids: d.ids } } : null
+    case 'chat': {
+      const chat = toChat(d)
+      return chat ? { t: 'chat', d: chat } : null
+    }
+    case 'chatHistory':
+      return Array.isArray(d.messages) ? { t: 'chatHistory', d: { messages: d.messages.flatMap((m) => toChat(m) ?? []) } } : null
+    case 'chatError':
+      return isString(d.cid) && isString(d.reason) ? { t: 'chatError', d: { cid: d.cid, reason: errorReason(d.reason) } } : null
     default:
       return null
   }
@@ -94,4 +139,37 @@ function isWelcome(d: Record<string, unknown>): d is Welcome {
 
 function isState(d: Record<string, unknown>): d is State {
   return isInt(d.tick) && isInt(d.ack) && Array.isArray(d.players) && d.players.every(isPos)
+}
+
+function isMedia(d: Record<string, unknown>): d is Media {
+  return isString(d.url) && d.url !== '' && isString(d.token) && d.token !== '' && isInt(d.expiresAt)
+}
+
+function isNearby(d: Record<string, unknown>): d is Nearby {
+  return Array.isArray(d.ids) && d.ids.every(isString)
+}
+
+export function isChatScope(v: unknown): v is ChatScope {
+  return v === 'everyone' || v === 'nearby' || v === 'direct'
+}
+
+const CHAT_ERROR_REASONS: readonly string[] = ['rate_limited', 'too_long', 'empty', 'offline', 'invalid']
+
+// An unknown reason from a newer server still fails the send.
+function errorReason(v: string): ChatErrorReason {
+  return CHAT_ERROR_REASONS.includes(v) ? (v as ChatErrorReason) : 'invalid'
+}
+
+function toChat(v: unknown): Chat | null {
+  if (!isRecord(v)) return null
+  const { id, at, from, fromName, scope, to, text, cid } = v
+  if (!isString(id) || id === '' || !isInt(at) || !isString(from) || !isString(fromName) || !isChatScope(scope) || !isString(text)) {
+    return null
+  }
+  if (scope === 'direct' ? !isString(to) : to != null) return null
+  if (cid != null && !isString(cid)) return null
+  const chat: Chat = { id, at, from, fromName, scope, text }
+  if (scope === 'direct' && isString(to)) chat.to = to
+  if (isString(cid)) chat.cid = cid
+  return chat
 }

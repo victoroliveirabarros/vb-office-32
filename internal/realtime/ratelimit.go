@@ -5,6 +5,10 @@ import "time"
 const (
 	messageRate  = 20
 	messageBurst = 40
+
+	// Chats also count against messageRate, like every message.
+	chatRate  = 0.5
+	chatBurst = 5
 )
 
 // tokenBucket is not safe for concurrent use; only a session's readLoop
