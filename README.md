@@ -102,6 +102,16 @@ nothing survives a restart. Message text, recipients and client ids never
 reach the logs. Rules and formats are in the
 [protocol spec](specs/phase1-protocol.md#chat).
 
+In the browser the map tints each zone with its name, and a strip at the
+top left shows the room you are in ("Sala 1 — reunião"). Inside a zone the
+"Perto" tab takes the room's name and warns that only the room sees it; the
+list of people marks who is in your room ("na sala"), near you ("perto") or
+in another room, read from positions and the public map. Clicking someone's
+avatar or name opens a direct conversation; its tab closes with ×, the
+Delete key or "Fechar conversa". Names used by more than one person get a
+short tag derived from their id (`Ana #k3f9`) in the list, the chat and over
+the avatars.
+
 ## Login
 
 With `VB_OFFICE32_AUTH=oidc` the page asks `/api/session` who is logged
