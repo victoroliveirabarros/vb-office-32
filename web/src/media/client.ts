@@ -1,3 +1,4 @@
+import { Names } from '../chat/names'
 import type { Tile } from '../game/grid'
 import { backoffDelay } from '../net/connection'
 import type { ConnectionStatus } from '../net/connection'
@@ -341,7 +342,8 @@ export class MediaClient implements MediaControls {
     },
     subscribed: (media) => {
       const el = media.attach()
-      const name = this.players.get(media.identity)?.name ?? media.identity
+      const player = this.players.get(media.identity)
+      const name = player ? new Names([...this.players].map(([id, p]) => [id, p.name] as const)).label(media.identity, player.name) : media.identity
       switch (media.source) {
         case 'microphone':
           return this.view.addAudio(el)

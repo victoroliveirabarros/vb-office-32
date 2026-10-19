@@ -202,3 +202,54 @@ describe('ChatState', () => {
     expect(state.active).toBe('dm:guest:ana')
   })
 })
+
+describe('ChatState.closeTab', () => {
+  it('closes only direct tabs', () => {
+    const state = joined()
+    expect(state.closeTab('everyone')).toBe(false)
+    expect(state.closeTab('nearby')).toBe(false)
+    expect(state.closeTab('dm:guest:x')).toBe(false)
+    expect(state.tabs().map((t) => t.key)).toEqual(['everyone', 'nearby'])
+  })
+
+  it('selects the tab before the closed active one', () => {
+    const state = joined()
+    state.openDirect('guest:ana', 'Ana')
+    state.openDirect('guest:bia', 'Bia')
+    state.select('dm:guest:ana')
+    expect(state.closeTab('dm:guest:bia')).toBe(true)
+    expect(state.active).toBe('dm:guest:ana')
+    expect(state.closeTab('dm:guest:ana')).toBe(true)
+    expect(state.active).toBe('nearby')
+    expect(state.tabs().map((t) => t.key)).toEqual(['everyone', 'nearby'])
+  })
+
+  it('drops its messages and unread count', () => {
+    const state = joined()
+    state.receive(chat({ scope: 'direct', to: SELF, text: 'um' }))
+    expect(state.unreadTotal()).toBe(1)
+    state.closeTab('dm:guest:ana')
+    expect(state.unreadTotal()).toBe(0)
+    expect(state.tab('dm:guest:ana')).toBeUndefined()
+  })
+
+  it('reopens on a new message from the peer, empty of the old ones', () => {
+    const state = joined()
+    state.receive(chat({ scope: 'direct', to: SELF, text: 'um' }))
+    state.closeTab('dm:guest:ana')
+    expect(state.receive(chat({ scope: 'direct', to: SELF, text: 'dois' }))).toBe('dm:guest:ana')
+    expect(texts(state, 'dm:guest:ana')).toEqual(['dois'])
+  })
+
+  it('does not reopen for the echo of a send it carried', () => {
+    const state = joined()
+    state.openDirect('guest:bia', 'Bia')
+    const msg = sendOk(state, directKey('guest:bia'), 'oi')
+    state.closeTab(directKey('guest:bia'))
+    const echo = chat({ from: SELF, fromName: 'Eu', scope: 'direct', to: 'guest:bia', text: 'oi', cid: msg.cid })
+    expect(state.receive(echo)).toBeNull()
+    expect(state.tab(directKey('guest:bia'))).toBeUndefined()
+    expect(state.fail(msg.cid, 'offline')).toBe(false)
+    expect(state.receive({ ...echo, id: 'outra' })).toBe(directKey('guest:bia'))
+  })
+})

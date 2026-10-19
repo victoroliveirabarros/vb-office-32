@@ -9,7 +9,11 @@
     <div id="game"></div>
     <div id="status" class="badge" hidden></div>
     <div id="latency" class="badge" hidden></div>
-    <button id="logout" class="button" type="button" hidden>Sair</button>
+    <div class="hud-corner">
+      <button id="logout" class="button" type="button" hidden>Sair</button>
+      <div id="zone" class="zone-strip" hidden></div>
+    </div>
+    <div id="zone-status" class="sr-only" role="status"></div>
     <div id="media-tiles" hidden></div>
     <div id="media-stage" hidden><span id="media-stage-label"></span></div>
     <div id="media-bar" hidden>
@@ -40,7 +44,10 @@
           <ul id="chat-roster" class="chat-roster" aria-label="Presentes"></ul>
         </div>
         <div id="chat-tabpanel" class="chat-tabpanel" role="tabpanel">
-          <p id="chat-notice" class="chat-notice"></p>
+          <div class="chat-notice-row">
+            <p id="chat-notice" class="chat-notice"></p>
+            <button id="chat-dm-close" class="chat-dm-close" type="button" hidden>Fechar conversa</button>
+          </div>
           <div id="chat-log" class="chat-log" role="log" aria-label="Mensagens" aria-busy="false" tabindex="0"></div>
         </div>
         <form id="chat-form" class="chat-form">

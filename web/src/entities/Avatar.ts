@@ -43,6 +43,13 @@ export class Avatar extends Phaser.GameObjects.Container {
     this.label.setText(name)
   }
 
+  // Makes the avatar clickable; fn runs on release so that focus moved by
+  // it is not taken back by the press.
+  onPick(fn: () => void): void {
+    this.sprite.setInteractive({ useHandCursor: true })
+    this.sprite.on(Phaser.Input.Events.GAMEOBJECT_POINTER_UP, fn)
+  }
+
   setSpeaking(speaking: boolean): void {
     this.ring.setVisible(speaking)
   }

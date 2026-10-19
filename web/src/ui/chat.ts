@@ -3,9 +3,11 @@ import type { Cleaned } from '../chat/clean'
 import { atBottom, inputAction, shouldFocusChat } from '../chat/keys'
 import type { TypingGate } from '../chat/keys'
 import { Roster } from '../chat/roster'
+import type { Person } from '../chat/roster'
 import { ChatState } from '../chat/state'
 import type { Entry, FailReason, Tab, TabKey } from '../chat/state'
 import type { Connection, ConnectionStatus } from '../net/connection'
+import type { ZoneMap } from '../game/zones'
 import type { ServerMessage } from '../net/protocol'
 import { requireElement } from './dom'
 
@@ -26,16 +28,21 @@ export function failureText(reason: FailReason | null): string {
   return `Não enviada: ${REASON_TEXT[reason ?? 'invalid']}`
 }
 
-type RosterView = Pick<Roster, 'online' | 'name' | 'nearby'>
+type RosterView = Pick<Roster, 'online' | 'label' | 'labelFor' | 'nearby' | 'room' | 'inOurRoom'>
+
+export function peerLabel(tab: Tab, roster: RosterView): string {
+  if (tab.peer === null) return tab.peerName
+  return roster.label(tab.peer) ?? (tab.peerName === '' ? '' : roster.labelFor(tab.peer, tab.peerName))
+}
 
 export function tabLabel(tab: Tab, roster: RosterView): string {
   switch (tab.scope) {
     case 'everyone':
       return 'Todos'
     case 'nearby':
-      return 'Perto'
+      return roster.room?.name ?? 'Perto'
     case 'direct':
-      return (tab.peer !== null && roster.name(tab.peer)) || tab.peerName || 'Conversa'
+      return peerLabel(tab, roster) || 'Conversa'
   }
 }
 
@@ -51,7 +58,11 @@ export function tabNotice(tab: Tab, roster: RosterView): Notice {
     case 'everyone':
       return { text: 'Todos no escritório veem, inclusive quem entrar depois.', canSend: true }
     case 'nearby': {
-      const names = roster.nearby().map((id) => roster.name(id) ?? id)
+      const names = roster.nearby().map((id) => roster.label(id) ?? id)
+      if (roster.room) {
+        if (names.length === 0) return { text: 'Visível só para quem está na sala. Ninguém mais aqui agora; só você verá.', canSend: true }
+        return { text: `Visível só para quem está na sala: ${names.join(', ')}.`, canSend: true }
+      }
       if (names.length === 0) return { text: 'Ninguém perto de você agora; só você verá.', canSend: true }
       return { text: `Perto de você agora: ${names.join(', ')}.`, canSend: true }
     }
@@ -63,13 +74,29 @@ export function tabNotice(tab: Tab, roster: RosterView): Notice {
   }
 }
 
+export type PersonTag = { text: string; kind: 'near' | 'room' | 'elsewhere' }
+
+/** Where someone else is from our point of view: in our room, near us, or in another room. */
+export function personTag(person: Person, roster: Pick<Roster, 'room' | 'inOurRoom'>): PersonTag | null {
+  if (person.self) return null
+  if (roster.inOurRoom(person.id)) return { text: 'na sala', kind: 'room' }
+  if (!roster.room && person.nearby) return { text: 'perto', kind: 'near' }
+  if (person.room) return { text: person.room.name, kind: 'elsewhere' }
+  return null
+}
+
+export function personAriaLabel(person: Person, tag: PersonTag | null): string {
+  if (person.self) return `${person.label}, você`
+  return `Conversar com ${person.label}${tag ? `, ${tag.text}` : ''}`
+}
+
 export function counterText(cleaned: Cleaned): string {
   return `${cleaned.runes}/${MAX_RUNES}`
 }
 
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
 
-type EntryView = { root: HTMLElement; time: HTMLTimeElement; state: HTMLElement; text: HTMLElement; shown: string }
+type EntryView = { root: HTMLElement; from: HTMLElement; time: HTMLTimeElement; state: HTMLElement; text: HTMLElement; shown: string }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
@@ -83,7 +110,13 @@ function sameChildren(parent: Element, nodes: readonly Element[]): boolean {
   return children.length === nodes.length && nodes.every((node, i) => children[i] === node)
 }
 
-export function createChat(link: ChatLink, gate: TypingGate): void {
+export type ChatApi = {
+  /** Opens the direct conversation with id, unless it is us or offline. */
+  openDirect(id: string): void
+  setZones(zones: ZoneMap): void
+}
+
+export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
   const root = requireElement('chat', HTMLElement)
   const toggle = requireElement('chat-toggle', HTMLButtonElement)
   const toggleBadge = requireElement('chat-toggle-badge', HTMLSpanElement)
@@ -95,6 +128,7 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
   const people = requireElement('chat-people', HTMLDivElement)
   const peopleList = requireElement('chat-roster', HTMLUListElement)
   const notice = requireElement('chat-notice', HTMLParagraphElement)
+  const closeDirect = requireElement('chat-dm-close', HTMLButtonElement)
   const log = requireElement('chat-log', HTMLDivElement)
   const form = requireElement('chat-form', HTMLFormElement)
   const input = requireElement('chat-input', HTMLTextAreaElement)
@@ -106,7 +140,8 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
   const state = new ChatState()
   const entryViews = new WeakMap<Entry, EntryView>()
   const tabButtons = new Map<TabKey, { button: HTMLButtonElement; label: HTMLSpanElement; badge: HTMLSpanElement }>()
-  const personItems = new Map<string, { item: HTMLLIElement; button: HTMLButtonElement; name: HTMLSpanElement; near: HTMLSpanElement }>()
+  const personItems = new Map<string, { item: HTMLLIElement; button: HTMLButtonElement; name: HTMLSpanElement; tag: HTMLSpanElement }>()
+  let tabSeq = 0
   let connected = false
   let shownTab: TabKey | null = null
   let draft = clean('')
@@ -142,7 +177,7 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
       if (!view) {
         const button = el('button', 'chat-tab')
         button.type = 'button'
-        button.id = `chat-tab-${tabButtons.size}`
+        button.id = `chat-tab-${tabSeq++}`
         button.setAttribute('role', 'tab')
         button.setAttribute('aria-controls', tabPanel.id)
         const label = el('span', 'chat-tab-label')
@@ -151,13 +186,25 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
         badge.setAttribute('aria-hidden', 'true')
         button.append(label, badge)
         const key = tab.key
-        button.addEventListener('click', () => select(key))
+        if (tab.scope === 'direct') {
+          // Mouse shortcut; keyboards use Delete or the button in the panel.
+          const x = el('span', 'chat-tab-close')
+          x.setAttribute('aria-hidden', 'true')
+          x.title = 'Fechar conversa'
+          button.append(x)
+          button.setAttribute('aria-keyshortcuts', 'Delete')
+        }
+        button.addEventListener('click', (e) => {
+          if (e.target instanceof Element && e.target.closest('.chat-tab-close')) closeTab(key)
+          else select(key)
+        })
         view = { button, label, badge }
         tabButtons.set(key, view)
       }
       const selected = tab.key === state.active
       const label = tabLabel(tab, roster)
       view.label.textContent = label
+      view.button.title = label
       view.badge.textContent = tab.unread > 99 ? '99+' : String(tab.unread)
       view.badge.hidden = tab.unread === 0
       view.button.setAttribute('aria-label', tabAriaLabel(label, tab.unread))
@@ -180,7 +227,7 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     if (view) return view
     const root = el('div', 'chat-msg')
     const head = el('div', 'chat-head')
-    const from = el('span', 'chat-from', entry.fromName)
+    const from = el('span', 'chat-from')
     from.dir = 'auto'
     const time = el('time', 'chat-time')
     const stateText = el('span', 'chat-state')
@@ -189,7 +236,7 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     head.append(from, time, stateText)
     root.append(head, text)
     root.classList.toggle('own', entry.own)
-    view = { root, time, state: stateText, text, shown: '' }
+    view = { root, from, time, state: stateText, text, shown: '' }
     entryViews.set(entry, view)
     return view
   }
@@ -199,9 +246,11 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     shownTab = tab.key
     const nodes = tab.entries.map((entry) => {
       const view = entryView(entry)
-      const shown = `${entry.status} ${entry.reason} ${entry.at} ${entry.text}`
+      const from = roster.labelFor(entry.from, entry.fromName)
+      const shown = `${entry.status} ${entry.reason} ${entry.at} ${from}\n${entry.text}`
       if (view.shown === shown) return view.root
       view.shown = shown
+      view.from.textContent = from
       const at = new Date(entry.at)
       const valid = Number.isFinite(at.getTime())
       view.time.dateTime = valid ? at.toISOString() : ''
@@ -227,18 +276,22 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
         button.type = 'button'
         const name = el('span', 'chat-person-name')
         name.dir = 'auto'
-        const near = el('span', 'chat-person-near', 'perto')
-        button.append(name, near)
+        const tag = el('span', 'chat-person-tag')
+        tag.dir = 'auto'
+        button.append(name, tag)
         item.append(button)
         const id = person.id
         button.addEventListener('click', () => openDirect(id))
-        view = { item, button, name, near }
+        view = { item, button, name, tag }
         personItems.set(id, view)
       }
-      view.name.textContent = person.self ? `${person.name} (você)` : person.name
-      view.near.hidden = !person.nearby
+      const tag = personTag(person, roster)
+      view.name.textContent = person.self ? `${person.label} (você)` : person.label
+      view.tag.textContent = tag?.text ?? ''
+      view.tag.hidden = tag === null
+      view.tag.dataset.kind = tag?.kind ?? ''
       view.button.disabled = person.self
-      view.button.setAttribute('aria-label', person.self ? `${person.name}, você` : `Conversar com ${person.name}${person.nearby ? ', perto' : ''}`)
+      view.button.setAttribute('aria-label', personAriaLabel(person, tag))
       return view.item
     })
     for (const id of [...personItems.keys()]) if (!roster.online(id)) personItems.delete(id)
@@ -252,6 +305,8 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     const info = tabNotice(tab, roster)
     notice.textContent = info.text
     notice.classList.toggle('offline', !info.canSend)
+    closeDirect.hidden = tab.scope !== 'direct'
+    closeDirect.setAttribute('aria-label', `Fechar conversa com ${tabLabel(tab, roster)}`)
     canSendHere = info.canSend
     renderLog(tab, forceBottom)
     renderPeople()
@@ -262,6 +317,14 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     if (!state.select(key)) return
     setError('')
     render(true)
+  }
+
+  const closeTab = (key: TabKey) => {
+    if (!state.closeTab(key)) return
+    tabButtons.delete(key)
+    setError('')
+    render(true)
+    tabButtons.get(state.active)?.button.focus()
   }
 
   const openDirect = (id: string) => {
@@ -317,6 +380,7 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
         }
         return
     }
+    // A state message counts only when someone changed room.
     if (rosterChanged) render()
   }
 
@@ -347,6 +411,12 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     const keys = state.tabs().map((t) => t.key)
     const i = keys.indexOf(state.active)
     let next: TabKey | undefined
+    if (e.key === 'Delete' && state.tab(state.active)?.scope === 'direct') {
+      e.preventDefault()
+      e.stopPropagation()
+      closeTab(state.active)
+      return
+    }
     if (e.key === 'ArrowRight') next = keys[(i + 1) % keys.length]
     else if (e.key === 'ArrowLeft') next = keys[(i - 1 + keys.length) % keys.length]
     else if (e.key === 'Home') next = keys[0]
@@ -392,5 +462,14 @@ export function createChat(link: ChatLink, gate: TypingGate): void {
     input.focus()
   })
 
+  closeDirect.addEventListener('click', () => closeTab(state.active))
+
   setOpen(window.matchMedia('(min-width: 900px)').matches)
+
+  return {
+    openDirect,
+    setZones(zones) {
+      if (roster.setZones(zones)) render()
+    },
+  }
 }

@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import './style.css'
+import { toRoom } from './game/zones'
 import { MediaClient } from './media/client'
 import type { MediaRoom, RoomListener } from './media/client'
 import { storagePrefs } from './media/prefs'
@@ -41,8 +42,18 @@ function start(hud: Hud, connection: Connection): void {
     if (status === 'expired') location.assign('/')
   })
 
-  const office = new OfficeScene(connection, hud, media)
-  createChat(connection, office)
+  connection.onMessage((msg) => {
+    if (msg.t === 'zone') hud.setZone(toRoom(msg.d))
+  })
+
+  // The chat takes the keyboard from the scene, which opens the chat on a
+  // click on someone's avatar.
+  const chat = createChat(connection, { setTyping: (on) => office.setTyping(on) })
+  const office = new OfficeScene(connection, hud, {
+    speakers: media,
+    zonesLoaded: (zones) => chat.setZones(zones),
+    picked: (id) => chat.openDirect(id),
+  })
 
   new Phaser.Game({
     type: Phaser.AUTO,
