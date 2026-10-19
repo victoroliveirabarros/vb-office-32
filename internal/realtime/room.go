@@ -24,6 +24,7 @@ const (
 	// connection, so a reconnecting WebSocket does not drop the call.
 	removeGrace = 30 * time.Second
 	chatBuffer  = 64
+	lookBuffer  = 64
 )
 
 var errRoomClosed = errors.New("room closed")
@@ -69,6 +70,7 @@ type Room struct {
 	leaves   chan *Session
 	inputs   chan sessionInput
 	chats    chan sessionChat
+	looks    chan sessionAppearance
 	removals chan removal
 	listed   chan []string
 	arrived  chan string
@@ -101,6 +103,7 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 		leaves:   make(chan *Session),
 		inputs:   make(chan sessionInput, 256),
 		chats:    make(chan sessionChat, chatBuffer),
+		looks:    make(chan sessionAppearance, lookBuffer),
 		removals: make(chan removal),
 		listed:   make(chan []string),
 		arrived:  make(chan string),
@@ -139,6 +142,8 @@ func (r *Room) Run(ctx context.Context) error {
 			r.handleInput(in)
 		case c := <-r.chats:
 			r.handleChat(c)
+		case a := <-r.looks:
+			r.handleAppearance(a)
 		case rm := <-r.removals:
 			r.handleRemoval(ctx, rm)
 		case ids := <-r.listed:
@@ -207,6 +212,10 @@ func (r *Room) handleJoin(s *Session) {
 	}
 	r.cancelRemoval(s.id)
 	self := r.space.Join(s.id, s.name)
+	var newLook bool
+	if s.look != nil {
+		self, newLook = r.space.SetAppearance(s.id, *s.look)
+	}
 	m := &member{sess: s}
 	r.members[s.id] = m
 
@@ -236,7 +245,7 @@ func (r *Room) handleJoin(s *Session) {
 	r.sendHistory(s)
 	r.log.Info("player joined", "id", s.id, "replaced", replaced)
 
-	if !replaced || old.sess.name != s.name {
+	if !replaced || old.sess.name != s.name || newLook {
 		r.broadcast(typeJoined, newPlayerMsg(self), s.id)
 	}
 }

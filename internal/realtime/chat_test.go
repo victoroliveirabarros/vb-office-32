@@ -575,7 +575,7 @@ func BenchmarkChatEveryone200(b *testing.B) {
 		}
 	}
 	for i := range sessions {
-		sessions[i] = newSession(auth.Identity{ID: "guest:bot-" + strconv.Itoa(i), Name: "bot " + strconv.Itoa(i)}, nil, room, nil, log)
+		sessions[i] = newSession(auth.Identity{ID: "guest:bot-" + strconv.Itoa(i), Name: "bot " + strconv.Itoa(i)}, nil, room, sessionLimits{}, log)
 		room.handleJoin(sessions[i])
 		drainAll()
 	}
@@ -621,8 +621,8 @@ func TestChatRateLimitSurvivesReconnect(t *testing.T) {
 	}
 }
 
-func TestChatLimitsForgetRefilledBuckets(t *testing.T) {
-	l := newChatLimits()
+func TestIdentityLimitsForgetRefilledBuckets(t *testing.T) {
+	l := newIdentityLimits(chatRate, chatBurst)
 	t0 := time.Unix(1000, 0)
 	drain := func(id string, now time.Time) {
 		t.Helper()
@@ -636,12 +636,12 @@ func TestChatLimitsForgetRefilledBuckets(t *testing.T) {
 		}
 	}
 	drain("a", t0)
-	drain("b", t0.Add(chatSweep-time.Second))
+	drain("b", t0.Add(limitSweep-time.Second))
 	if len(l.buckets) != 2 {
 		t.Fatalf("%d buckets before the sweep, want 2", len(l.buckets))
 	}
 
-	now := t0.Add(chatSweep)
+	now := t0.Add(limitSweep)
 	if !l.allow("c", now) {
 		t.Fatal("new identity rejected")
 	}

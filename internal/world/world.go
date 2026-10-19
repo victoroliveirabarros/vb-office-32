@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 )
 
@@ -17,7 +18,8 @@ const (
 	StepCooldown     = 150 * time.Millisecond
 	MaxPendingInputs = 8
 
-	// maxLast bounds how many departed players keep their last position.
+	// maxLast bounds how many departed players keep their last position and
+	// look.
 	maxLast = 1000
 
 	// stepSlack absorbs ticker jitter: a step is due this much early, and a
@@ -63,10 +65,11 @@ func (d Dir) offset() tilemap.Point {
 }
 
 type Player struct {
-	ID   string
-	Name string
-	Pos  tilemap.Point
-	Dir  Dir
+	ID         string
+	Name       string
+	Pos        tilemap.Point
+	Dir        Dir
+	Appearance avatar.Appearance
 }
 
 type Input struct {
@@ -101,6 +104,7 @@ type player struct {
 type lastSeen struct {
 	pos   tilemap.Point
 	dir   Dir
+	look  avatar.Appearance
 	order uint64
 }
 
@@ -132,7 +136,9 @@ func NewSpace(m *tilemap.Map) *Space {
 }
 
 // Join adds a player or, if id is already present, resets its input state
-// for a new connection while keeping its position and near set. The new
+// for a new connection while keeping its position, look and near set. A new
+// player takes its last position and look or, unknown, a spawn point and
+// avatar.Default(id). The new
 // connection is expected to read Nearby, so a pending change to that set is
 // not reported again by Step. A new player's near set is computed by the
 // next Step; its zone is set at once and, like a kept one, never reported in
@@ -148,10 +154,11 @@ func (s *Space) Join(id, name string) Player {
 
 	p := &player{Player: Player{ID: id, Name: name, Dir: Down}}
 	if l, ok := s.last[id]; ok {
-		p.Pos, p.Dir = l.pos, l.dir
+		p.Pos, p.Dir, p.Appearance = l.pos, l.dir, l.look
 		delete(s.last, id)
 	} else {
 		p.Pos = s.m.Spawns[s.nextSpawn%len(s.m.Spawns)]
+		p.Appearance = avatar.Default(id)
 		s.nextSpawn++
 	}
 	p.zone = s.m.ZoneAt(p.Pos)
@@ -166,12 +173,35 @@ func (s *Space) Leave(id string) {
 		return
 	}
 	s.lastOrder++
-	s.last[id] = lastSeen{pos: p.Pos, dir: p.Dir, order: s.lastOrder}
+	s.last[id] = lastSeen{pos: p.Pos, dir: p.Dir, look: p.Appearance, order: s.lastOrder}
 	delete(s.players, id)
 	s.dropNear(id)
 	if len(s.last) > s.lastCap {
 		s.evictOldest()
 	}
+}
+
+// Player returns the player id; false when id is not in the space.
+func (s *Space) Player(id string) (Player, bool) {
+	p, ok := s.players[id]
+	if !ok {
+		return Player{}, false
+	}
+	return p.Player, true
+}
+
+// SetAppearance changes the look of id and reports whether it changed. An
+// unknown id or a look outside the catalog changes nothing.
+func (s *Space) SetAppearance(id string, a avatar.Appearance) (Player, bool) {
+	p, ok := s.players[id]
+	if !ok {
+		return Player{}, false
+	}
+	if !a.Valid() || p.Appearance == a {
+		return p.Player, false
+	}
+	p.Appearance = a
+	return p.Player, true
 }
 
 func (s *Space) evictOldest() {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
@@ -23,6 +24,8 @@ const (
 	typeMedia   = "media"
 	typeNearby  = "nearby"
 	typeZone    = "zone"
+
+	typeAppearance = "appearance"
 
 	typeChat        = "chat"
 	typeChatHistory = "chatHistory"
@@ -45,7 +48,8 @@ type envelope struct {
 	D json.RawMessage `json:"d"`
 }
 
-// clientMsg is a decoded client message: moveMsg, pingMsg or chatIn.
+// clientMsg is a decoded client message: moveMsg, pingMsg, chatIn or
+// appearanceIn.
 type clientMsg interface {
 	clientMsg()
 }
@@ -67,9 +71,14 @@ type chatIn struct {
 	Text  string     `json:"text"`
 }
 
-func (moveMsg) clientMsg() {}
-func (pingMsg) clientMsg() {}
-func (chatIn) clientMsg()  {}
+// appearanceIn is a look as the client asks for it, still unchecked against
+// the catalog; absent fields are 0.
+type appearanceIn avatar.Appearance
+
+func (moveMsg) clientMsg()      {}
+func (pingMsg) clientMsg()      {}
+func (chatIn) clientMsg()       {}
+func (appearanceIn) clientMsg() {}
 
 // valid checks what a well-formed chat can still get wrong; the answer is a
 // chatError, not a close.
@@ -98,11 +107,12 @@ func validCID(cid string) bool {
 }
 
 type playerMsg struct {
-	ID   string    `json:"id"`
-	Name string    `json:"name"`
-	X    int       `json:"x"`
-	Y    int       `json:"y"`
-	Dir  world.Dir `json:"dir"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	X          int               `json:"x"`
+	Y          int               `json:"y"`
+	Dir        world.Dir         `json:"dir"`
+	Appearance avatar.Appearance `json:"appearance"`
 }
 
 type posMsg struct {
@@ -118,6 +128,11 @@ type welcomeMsg struct {
 	TickRate int         `json:"tickRate"`
 	StepMs   int64       `json:"stepMs"`
 	Players  []playerMsg `json:"players"`
+}
+
+type appearanceMsg struct {
+	ID         string            `json:"id"`
+	Appearance avatar.Appearance `json:"appearance"`
 }
 
 type leftMsg struct {
@@ -178,7 +193,7 @@ func newChatOut(m chat.Message, cid string) chatOut {
 }
 
 func newPlayerMsg(p world.Player) playerMsg {
-	return playerMsg{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Dir: p.Dir}
+	return playerMsg{ID: p.ID, Name: p.Name, X: p.Pos.X, Y: p.Pos.Y, Dir: p.Dir, Appearance: p.Appearance}
 }
 
 func decodeClient(b []byte) (clientMsg, error) {
@@ -211,6 +226,17 @@ func decodeClient(b []byte) (clientMsg, error) {
 			return nil, fmt.Errorf("%w: chat: cid", errInvalidMessage)
 		}
 		return m, nil
+	case typeAppearance:
+		// Wrong types, negatives, fractions and values over 255 fail here;
+		// values outside the catalog are the session's to answer.
+		var m *appearanceIn
+		if err := json.Unmarshal(env.D, &m); err != nil {
+			return nil, fmt.Errorf("%w: appearance: %w", errInvalidMessage, jsonError(err))
+		}
+		if m == nil {
+			return nil, fmt.Errorf("%w: appearance: null", errInvalidMessage)
+		}
+		return *m, nil
 	}
 	return nil, fmt.Errorf("%w: type %q", errInvalidMessage, env.T)
 }
