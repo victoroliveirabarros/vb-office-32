@@ -55,9 +55,12 @@ on, none turns it off, and a partial set is an error.
 With the LiveKit variables set, each player gets a LiveKit token right after
 `welcome` (`media`). Media or not, the server sends each player the set of
 players within earshot (`nearby`): a pair becomes near at 4 tiles and stops
-at more than 5. Tokens last 10 minutes and
-are reissued about every 5 (the server checks once a minute); the server
-never logs them. A player whose WebSocket stays closed for 30 seconds is
+at more than 5. Meeting rooms and private booths are zones of the map
+(`zones` layer): inside one, earshot is everyone in the same zone at any
+distance and nobody outside, not even at the door, and each player is told
+its own zone (`zone`) at join and whenever it crosses a border. Tokens last
+10 minutes and are reissued about every 5 (the server checks once a
+minute); the server never logs them. A player whose WebSocket stays closed for 30 seconds is
 removed from the LiveKit room through its API, since LiveKit would otherwise
 keep renewing that connection; reconnecting within the 30 seconds keeps the
 call. Anyone who joins the LiveKit room without a WebSocket here is removed
@@ -85,8 +88,9 @@ starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is `ws://localhost` or
 ## Chat
 
 Players chat with everyone in the space, with whoever is `nearby` at the
-moment of sending, or directly with one player who is online (otherwise the
-sender gets `offline`; nothing is queued). The server cleans the text
+moment of sending (inside a zone, only those in it), or directly with one
+player who is online (otherwise the sender gets `offline`; nothing is
+queued). The server cleans the text
 (invalid UTF-8, control and bidi/format characters, trailing spaces, runs of
 blank lines; emoji sequences and the Persian ZWNJ survive), refuses it when
 empty or over 500 characters or 20 lines instead of truncating, and allows
@@ -190,7 +194,7 @@ make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -chat"   # bots also chat, repor
 VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime
 ```
 
-The wire protocol and map format are specified in
+The wire protocol, zones and map format are specified in
 [`specs/phase1-protocol.md`](specs/phase1-protocol.md).
 
 ## License

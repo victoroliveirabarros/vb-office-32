@@ -22,7 +22,6 @@ Escopo e decisões em [`phase3.md`](phase3.md). Envs `VB_OFFICE32_LIVEKIT_URL`, 
 
 ## Depois da fase 3a
 
-- Permissões de trilha do publicador (`setTrackSubscriptionPermissions`) como enforcement barato de quem assina quem (fase 5, junto com zonas).
 - Métricas Prometheus em fase posterior (sessões ativas, recusas por `server full`, closes por motivo, duração do tick, latência de ack, logins negados por motivo, mídia emitida).
 
 ## Hardening de segurança (feito)
@@ -48,6 +47,16 @@ Escopo e decisões em [`phase4.md`](phase4.md) (refinamento 4a): pacote puro `in
 - Bucket de `everyone` por Room: hoje só há limite por conexão, então muitos remetentes juntos podem encher o buffer de envio (64) de um cliente lento e derrubá-lo por `slow consumer`.
 - TTL do histórico (hoje fica até o restart) e bucket de chat por identidade (hoje é por conexão; reconectar zera).
 - Alias opaco no lugar de `oidc:<sub>` nos ids que vão para os clientes.
+
+## Fase 5b — mídia em zonas (feito)
+
+Escopo e decisões em [`phase5.md`](phase5.md) (refinamento 5b): permissões de assinatura do publicador = conjunto `nearby` (vazio ao criar a sala, de novo após o `connect` e antes dos dispositivos, a cada `nearby`, zerado no `welcome` e com o WS fora de `open`), grant `screen_share`, `Permissions-Policy: display-capture=(self)`, tela 720p/5 fps só em sala `meeting` com palco e no máximo 1 tela assinada, volume 1,0 dentro da zona. Validado contra LiveKit v1.13.10 com `web/e2e/intruder.mjs` (latências em `docs/livekit.md`). Desvio: após o `connect` o cliente envia o conjunto atual (vazio se ainda não houve `nearby`), não sempre a lista vazia, senão uma reconexão da sala deixaria todos mudos até o próximo `nearby` diferente.
+
+## Depois da fase 5b
+
+- Endurecimento de tela fora de sala: webhook `track_published` com `source = SCREEN_SHARE` de quem não está numa zona `meeting` → `UpdateParticipant` tirando `screen_share` de `canPublishSources` (e `MutePublishedTrack`/unpublish da trilha). Hoje o servidor tolera: clientes honestos não assinam tela fora de sala, então não há egress.
+- Testes end-to-end com Playwright (login, andar, entrar em sala, mídia com dispositivos falsos) no CI, substituindo o harness manual `web/e2e/intruder.mjs` (CDP sem dependências).
+- O SDK descarta `TrackSubscriptionPermissionChanged` que chega durante o join (`emitWhenConnected`); o log de depuração de `not_allowed` > 3 s só vale para o que muda depois de conectado.
 
 ## Descartado
 
