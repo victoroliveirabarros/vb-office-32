@@ -31,8 +31,8 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 ```
 
 - Mensagem do cliente > 8 KiB ou inválida → close 1008.
-- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`. O chat tem um limite próprio, que não fecha a conexão (ver [Chat](#chat)).
-- Cliente lento (buffer de envio cheio, 64 mensagens) → close 1008 reason `"slow consumer"`.
+- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`. O chat tem limites próprios, por identidade e por espaço, que não fecham a conexão (ver [Chat](#chat)).
+- Cliente lento (buffer de envio cheio, 256 mensagens) → close 1008 reason `"slow consumer"`.
 - Shutdown do servidor → close 1001 reason `"server restarting"`. O cliente reconecta com backoff.
 
 ### Close codes e ação do cliente
@@ -118,15 +118,17 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 - `chatError`, sem fechar a conexão, verificado nesta ordem (o primeiro que falhar responde):
   1. `invalid`: `scope` desconhecido ou ausente; `direct` sem `to` ou com `to` vazio; `to` presente fora de `direct`; `to` igual ao próprio id; `to` com mais de 300 bytes.
   2. `empty` / `too_long`: texto vazio depois da limpeza; mais de 500 runes (code points) ou mais de 20 linhas depois da limpeza. O servidor nunca trunca.
-  3. `rate_limited`: token bucket próprio do chat, 0,5/s com burst 5 (5 seguidas, depois 1 a cada 2 s). Só mensagem que passou nas regras acima gasta token. O bucket geral de 20/s conta toda mensagem antes disso.
-  4. `offline`: `direct` para quem não está conectado.
+  3. `rate_limited`: token bucket do chat **por identidade**, 0,5/s com burst 5 (5 seguidas, depois 1 a cada 2 s), compartilhado por todas as conexões da identidade: reconectar não devolve tokens. Só mensagem que passou nas regras acima gasta token. O bucket geral de 20/s, por conexão, conta toda mensagem antes disso.
+  4. `rate_limited` (só `everyone`): token bucket **por espaço**, 20/s com burst 40, somando todos os remetentes, para uma rajada não encher o buffer de envio de quem recebe. O token da identidade já foi gasto.
+  5. `offline`: `direct` para quem não está conectado.
 - Limpeza do texto, nesta ordem (o texto entregue é o limpo):
   1. UTF-8 inválido → U+FFFD.
-  2. `\r\n`, `\r`, U+0085, U+2028, U+2029 → `\n`; `\t` → espaço.
+  2. `\r\n`, `\r`, U+0085, U+2028, U+2029 → `\n`; `\t` e as letras em branco (U+115F, U+1160, U+3164, U+FFA0 — preenchimentos do hangul — e U+2800, braille vazio) → espaço, para texto feito só delas virar `empty`.
   3. Remove controles (`Cc`) exceto `\n` e formatação (`Cf`): bidi (U+202A–202E, U+2066–2069, U+200E/F, U+061C), BOM, soft hyphen, U+200B, tags U+E0000–E007F etc.
   4. Exceção: ZWJ (U+200D) e ZWNJ (U+200C) ficam quando a rune anterior existe e não é ASCII, espaço nem formatação, e a próxima rune que não seja ZWJ/ZWNJ existe e não é espaço; repetidos colapsam no primeiro. Preserva emoji compostos (👨‍👩‍👧, 🏳️‍🌈, tons de pele), bandeiras e o ZWNJ do persa.
   5. Remove espaços no fim de cada linha; mais de 3 `\n` seguidos viram 3; trim nas pontas. Sem normalização Unicode (NFC).
 - O cliente exibe só como texto (`textContent`), nunca como HTML ou markdown. Pode espelhar a limpeza para contar caracteres, mas o servidor decide.
+- O JSON do servidor não escapa `<`, `>` e `&` (sai literal, não `\u003c`); o cliente usa `JSON.parse` e nunca injeta o texto como HTML.
 - O servidor nunca loga texto, `to` nem `cid`; só `chat rejected` com o motivo, em debug.
 
 ## Regras de movimento (servidor autoritativo)

@@ -1,6 +1,6 @@
 import { clean, MAX_LINES, MAX_RUNES } from '../chat/clean'
 import type { Cleaned } from '../chat/clean'
-import { atBottom, inputAction, shouldFocusChat } from '../chat/keys'
+import { atBottom, inputAction, keepFromGame, shouldFocusChat } from '../chat/keys'
 import type { TypingGate } from '../chat/keys'
 import { Roster } from '../chat/roster'
 import type { Person } from '../chat/roster'
@@ -452,6 +452,13 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     else input.blur()
   })
   input.addEventListener('keyup', (e) => e.stopPropagation())
+
+  // The log and the people list scroll with these keys; the game would walk.
+  const keepKeys = (e: KeyboardEvent) => {
+    if (keepFromGame(e)) e.stopPropagation()
+  }
+  root.addEventListener('keydown', keepKeys)
+  root.addEventListener('keyup', keepKeys)
 
   document.addEventListener('keydown', (e) => {
     if (root.hidden || !shouldFocusChat(e, e.target instanceof HTMLElement ? e.target : null)) return

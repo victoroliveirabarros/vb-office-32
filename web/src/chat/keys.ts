@@ -46,6 +46,13 @@ export function inputAction(e: KeyLike): InputAction {
   return null
 }
 
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'])
+
+/** Keys that scroll the chat and that the game, on window, would walk with. */
+export function keepFromGame(e: KeyLike): boolean {
+  return SCROLL_KEYS.has(e.key)
+}
+
 export function atBottom(el: ScrollLike, slack = 8): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= slack
 }

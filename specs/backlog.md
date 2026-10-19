@@ -41,12 +41,18 @@ S5 em [`security-hardening.md`](security-hardening.md): webhook `participant_joi
 
 Escopo e decisões em [`phase4.md`](phase4.md) (refinamento 4a): pacote puro `internal/chat` (limpeza do texto, histórico de 100, ids), validação, limpeza e limite de chat (0,5/s, burst 5) na goroutine de leitura da sessão, roteamento no Room (`room_chat.go`), `maxMessageSize` 8 KiB, `nearby` enviado também sem mídia, `chatHistory` sempre no join. Contrato em `phase1-protocol.md` (seção Chat). `loadbot -chat`.
 
+## Correções do QA da fase 4 (feito)
+
+- Bucket de chat por identidade (`chatLimits` no `Handler`, injetado na sessão; mapa com mutex, entradas cheias esquecidas por varredura preguiçosa a cada 1 min, sem goroutine): reconectar não devolve tokens.
+- Bucket de `everyone` por Room (20/s, burst 40 → `rate_limited` para o remetente) e buffer de envio de 64 para 256. Probe com 200 leitores e 70–150 remetentes de 5 × 400–500 chars: de 145–185 conexões derrubadas por `slow consumer` para 0. Agregar os chats do tick num frame ficou de fora: pede tipo novo no protocolo e o bucket já limita a rajada.
+- `loadbot` com limite de leitura de 1 MiB (histórico > 32 KiB derrubava o bot); `encode` sem escape de HTML; letras em branco (U+115F, U+1160, U+2800, U+3164, U+FFA0) viram espaço no `Clean` (Go e TS); `.chat-msg` com `overflow: hidden` (zalgo); falha `disconnected` que o histórico mostra entregue sai da aba Todos e o resto é ordenado por `at`; setas, Home, End, PageUp e PageDown dentro de `#chat` não chegam ao jogo.
+
 ## Depois da fase 4a (4c)
 
 - DM por clique no avatar; desambiguação de nomes repetidos na lista de presentes.
-- Bucket de `everyone` por Room: hoje só há limite por conexão, então muitos remetentes juntos podem encher o buffer de envio (64) de um cliente lento e derrubá-lo por `slow consumer`.
-- TTL do histórico (hoje fica até o restart) e bucket de chat por identidade (hoje é por conexão; reconectar zera).
+- TTL do histórico (hoje fica até o restart).
 - Alias opaco no lugar de `oidc:<sub>` nos ids que vão para os clientes.
+- O bucket de `everyone` é do espaço inteiro: quem tiver muitas identidades (modo guest) consegue ocupar o canal geral, embora não derrube ninguém. Em `oidc` cada identidade é uma conta do domínio.
 
 ## Fase 5b — mídia em zonas (feito)
 

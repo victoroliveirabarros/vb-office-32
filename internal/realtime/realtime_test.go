@@ -449,7 +449,7 @@ func TestOIDCWithoutCookieRejectedBeforeUpgrade(t *testing.T) {
 }
 
 func TestSlowConsumerIsClosed(t *testing.T) {
-	s := newSession(auth.Identity{ID: "guest:x", Name: "x"}, nil, nil, slog.New(slog.DiscardHandler))
+	s := newSession(auth.Identity{ID: "guest:x", Name: "x"}, nil, nil, nil, slog.New(slog.DiscardHandler))
 	for range sendBuffer {
 		s.send([]byte("{}"))
 	}
@@ -504,6 +504,24 @@ func TestEncodeState(t *testing.T) {
 	want := stateMsg{Tick: 7, Ack: 3, Players: []posMsg{{ID: "a", X: 1, Y: 2, Dir: world.Up}}}
 	if env.T != typeState || s.Tick != want.Tick || s.Ack != want.Ack || len(s.Players) != 1 || s.Players[0] != want.Players[0] {
 		t.Errorf("state = %s %+v, want %+v", env.T, s, want)
+	}
+}
+
+func TestEncodeKeepsHTML(t *testing.T) {
+	text := `<b>"oi" & tchau</b>`
+	b, err := encode(typeChat, chatOut{Text: text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"text":"<b>\"oi\" & tchau</b>"`) || strings.HasSuffix(string(b), "\n") {
+		t.Errorf("encoded %s, want HTML characters as they are and no trailing newline", b)
+	}
+	var env envelope
+	if err := json.Unmarshal(b, &env); err != nil {
+		t.Fatal(err)
+	}
+	if got := decode[chatOut](t, env).Text; got != text {
+		t.Errorf("round trip text = %q, want %q", got, text)
 	}
 }
 

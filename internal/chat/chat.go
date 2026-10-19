@@ -58,23 +58,31 @@ type Message struct {
 	Text     string
 }
 
-var breaks = strings.NewReplacer(
+// spaces maps line breaks to \n, and the tab and the blank letters (Hangul
+// fillers, the empty braille pattern), which render as space but are not
+// unicode.IsSpace, to a plain space, so text made only of them is empty.
+var spaces = strings.NewReplacer(
 	"\r\n", "\n",
 	"\r", "\n",
 	"\u0085", "\n",
 	"\u2028", "\n",
 	"\u2029", "\n",
 	"\t", " ",
+	"\u115f", " ",
+	"\u1160", " ",
+	"\u2800", " ",
+	"\u3164", " ",
+	"\uffa0", " ",
 )
 
 // Clean makes text safe to show as is: valid UTF-8, \n as the only control,
-// no format characters (bidi overrides, BOM, soft hyphen, tags) except a
+// blank letters turned into spaces, no format characters (bidi overrides, BOM, soft hyphen, tags) except a
 // joiner inside a word or emoji sequence, no trailing spaces on a line, at
 // most three breaks in a row and no surrounding space. It rejects text that
 // ends up empty, longer than MaxRunes or with more than MaxLines lines,
 // instead of truncating it.
 func Clean(text string) (string, error) {
-	rs := []rune(breaks.Replace(strings.ToValidUTF8(text, "\ufffd")))
+	rs := []rune(spaces.Replace(strings.ToValidUTF8(text, "\ufffd")))
 	rs = dropControls(rs)
 	rs = keepJoiners(rs)
 

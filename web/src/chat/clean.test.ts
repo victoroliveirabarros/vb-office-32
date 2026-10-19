@@ -45,6 +45,12 @@ describe('clean', () => {
     expect(clean('  recuo\nmantido').text).toBe('recuo\nmantido')
   })
 
+  it('treats blank letters as spaces, like the server', () => {
+    expect(clean('a\u{3164}b\u{2800}c\u{115F}d\u{1160}e\u{FFA0}f').text).toBe('a b c d e f')
+    expect(clean('\u{3164}\u{2800}oi\u{FFA0}\n\u{115F}').text).toBe('oi')
+    expect(clean('\u{3164}\u{2800}\u{115F}\u{1160}\u{FFA0}\n\u{3164}').error).toBe('empty')
+  })
+
   it('replaces lone surrogates as JSON decoding would', () => {
     expect(clean('a\uD800b').text).toBe('a�b')
   })

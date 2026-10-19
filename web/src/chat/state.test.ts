@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Chat } from '../net/protocol'
-import { ChatState, directKey } from './state'
+import { ChatState, DELIVERED_SLACK_MS, directKey } from './state'
 
 const SELF = 'guest:eu'
 
@@ -153,8 +153,8 @@ describe('ChatState', () => {
     expect(state.active).toBe('nearby')
   })
 
-  it('replaces everyone with history, keeping unconfirmed sends last', () => {
-    const state = joined()
+  it('replaces everyone with history, keeping unconfirmed sends', () => {
+    const state = joined({ now: () => 5000 })
     state.receive(chat({ id: 'h1', text: 'velha' }))
     state.receive(chat({ scope: 'nearby', text: 'perto' }))
     sendOk(state, 'everyone', 'pendente')
@@ -173,6 +173,63 @@ describe('ChatState', () => {
     state.history([chat({ id: 'h1', text: 'velha' }), chat({ id: 'h2', text: 'h2' })])
     expect(texts(state, 'everyone')).toEqual(['velha', 'h2', 'pendente', 'nova'])
     expect(state.tab('everyone')?.unread).toBe(1)
+  })
+
+  it('drops a lost send the history shows delivered and places the rest by time', () => {
+    let t = 1000
+    const state = joined({ now: () => t })
+    state.receive(chat({ id: 'h1', at: 1000, text: 'velha' }))
+    t = 2000
+    sendOk(state, 'everyone', 'chegou')
+    t = 3000
+    sendOk(state, 'everyone', 'perdida')
+    sendOk(state, 'everyone', 'chegou')
+    state.welcome(SELF, 'Eu')
+    t = 9000
+    sendOk(state, 'everyone', 'nova')
+
+    state.history([
+      chat({ id: 'h1', at: 1000, text: 'velha' }),
+      chat({ id: 's1', at: 2100, from: SELF, fromName: 'Eu', text: 'chegou' }),
+      chat({ id: 'h2', at: 2500, text: 'x' }),
+      chat({ id: 'h3', at: 9500, text: 'y' }),
+    ])
+    expect(state.tab('everyone')?.entries.map((e) => [e.text, e.status])).toEqual([
+      ['velha', 'sent'],
+      ['chegou', 'sent'],
+      ['x', 'sent'],
+      ['perdida', 'failed'],
+      ['chegou', 'failed'],
+      ['nova', 'pending'],
+      ['y', 'sent'],
+    ])
+  })
+
+  it('keeps a lost send unless an unseen own message matches it', () => {
+    let t = 1000
+    const state = joined({ now: () => t })
+    const first = sendOk(state, 'everyone', 'ok')
+    state.receive(chat({ id: 's1', at: 1000, from: SELF, fromName: 'Eu', text: 'ok', cid: first.cid }))
+    sendOk(state, 'everyone', 'ok')
+    const limited = sendOk(state, 'everyone', 'limitada')
+    state.fail(limited.cid, 'rate_limited')
+    t = 500_000
+    sendOk(state, 'everyone', 'tarde')
+    state.welcome(SELF, 'Eu')
+
+    state.history([
+      chat({ id: 's1', at: 1000, from: SELF, fromName: 'Eu', text: 'ok' }),
+      chat({ id: 's2', at: 1100, from: SELF, fromName: 'Eu', text: 'limitada' }),
+      chat({ id: 's3', at: 1000 + DELIVERED_SLACK_MS + 1, from: SELF, fromName: 'Eu', text: 'tarde' }),
+    ])
+    expect(state.tab('everyone')?.entries.map((e) => [e.text, e.status, e.reason])).toEqual([
+      ['ok', 'sent', null],
+      ['ok', 'failed', 'disconnected'],
+      ['limitada', 'failed', 'rate_limited'],
+      ['limitada', 'sent', null],
+      ['tarde', 'sent', null],
+      ['tarde', 'failed', 'disconnected'],
+    ])
   })
 
   it('marks own history entries as own', () => {

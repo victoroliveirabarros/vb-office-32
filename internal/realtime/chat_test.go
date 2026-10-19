@@ -436,6 +436,8 @@ func TestChatHistory(t *testing.T) {
 			if err := room.chat(t.Context(), sessionChat{sess: ana, cid: "c", scope: scope, to: to, text: text}); err != nil {
 				t.Fatal(err)
 			}
+			// Stays within the room's everyone limit.
+			time.Sleep(time.Second / everyoneRate)
 			synctest.Wait()
 			drain(t, ana)
 			drain(t, carol)
@@ -573,11 +575,13 @@ func BenchmarkChatEveryone200(b *testing.B) {
 		}
 	}
 	for i := range sessions {
-		sessions[i] = newSession(auth.Identity{ID: "guest:bot-" + strconv.Itoa(i), Name: "bot " + strconv.Itoa(i)}, nil, room, log)
+		sessions[i] = newSession(auth.Identity{ID: "guest:bot-" + strconv.Itoa(i), Name: "bot " + strconv.Itoa(i)}, nil, room, nil, log)
 		room.handleJoin(sessions[i])
 		drainAll()
 	}
 	c := sessionChat{sess: sessions[0], cid: "c1", scope: chat.Everyone, text: strings.Repeat("olá, pessoal ", 10)}
+	// Measures routing, not the room's everyone limit.
+	room.everyone = newTokenBucket(everyoneRate, 1<<40)
 
 	b.ReportAllocs()
 	for b.Loop() {
@@ -591,4 +595,153 @@ func BenchmarkChatEveryone200(b *testing.B) {
 		default:
 		}
 	}
+}
+
+func TestChatRateLimitSurvivesReconnect(t *testing.T) {
+	url := serveLine(t, slog.New(slog.DiscardHandler))
+	ana := dial(t, url, "Ana")
+	expect[welcomeMsg](ana, typeWelcome, nil)
+	for i := range chatBurst {
+		ana.chat("c"+strconv.Itoa(i), chat.Everyone, "", "oi")
+		readChat(ana)
+	}
+	ana.conn.Close(websocket.StatusNormalClosure, "")
+
+	again := dial(t, url, "Ana")
+	expect[welcomeMsg](again, typeWelcome, nil)
+	again.chat("r1", chat.Everyone, "", "de volta")
+	if got := readChatError(again); got != (chatErrorMsg{CID: "r1", Reason: chatRateLimited}) {
+		t.Errorf("after reconnecting got %+v, want rate_limited", got)
+	}
+	bob := dial(t, url, "Bob")
+	expect[welcomeMsg](bob, typeWelcome, nil)
+	bob.chat("b1", chat.Everyone, "", "oi")
+	if got, _ := readChat(bob); got.CID != "b1" {
+		t.Errorf("another identity got %+v, want the echo", got)
+	}
+}
+
+func TestChatLimitsForgetRefilledBuckets(t *testing.T) {
+	l := newChatLimits()
+	t0 := time.Unix(1000, 0)
+	drain := func(id string, now time.Time) {
+		t.Helper()
+		for range chatBurst {
+			if !l.allow(id, now) {
+				t.Fatalf("%s rejected within burst", id)
+			}
+		}
+		if l.allow(id, now) {
+			t.Fatalf("%s allowed past the burst", id)
+		}
+	}
+	drain("a", t0)
+	drain("b", t0.Add(chatSweep-time.Second))
+	if len(l.buckets) != 2 {
+		t.Fatalf("%d buckets before the sweep, want 2", len(l.buckets))
+	}
+
+	now := t0.Add(chatSweep)
+	if !l.allow("c", now) {
+		t.Fatal("new identity rejected")
+	}
+	if _, ok := l.buckets["a"]; ok {
+		t.Error("refilled bucket a kept after the sweep")
+	}
+	if _, ok := l.buckets["b"]; !ok {
+		t.Error("bucket b dropped while still refilling")
+	}
+	if l.allow("b", now) {
+		t.Error("b allowed with half a token")
+	}
+	if !l.allow("a", now) {
+		t.Error("a rejected after refilling")
+	}
+}
+
+func TestChatEveryoneRoomLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		room := runLineRoom(t, nil)
+		ana := joinAs(t, room, "Ana")
+		bob := joinAs(t, room, "Bob")
+		synctest.Wait()
+		drain(t, ana)
+		drain(t, bob)
+
+		send := func(cid string, scope chat.Scope, to string) {
+			t.Helper()
+			if err := room.chat(t.Context(), sessionChat{sess: ana, cid: cid, scope: scope, to: to, text: "x"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := range everyoneBurst + 1 {
+			send("e"+strconv.Itoa(i), chat.Everyone, "")
+		}
+		send("d1", chat.Direct, "guest:bob")
+		synctest.Wait()
+
+		var echoes int
+		var errs []chatErrorMsg
+		for len(ana.out) > 0 {
+			switch env := received(t, ana); env.T {
+			case typeChat:
+				echoes++
+			case typeChatError:
+				errs = append(errs, decode[chatErrorMsg](t, env))
+			}
+		}
+		if echoes != everyoneBurst+1 || len(errs) != 1 || errs[0] != (chatErrorMsg{CID: "e" + strconv.Itoa(everyoneBurst), Reason: chatRateLimited}) {
+			t.Errorf("sender got %d echoes and errors %v, want %d echoes and the last everyone rate_limited", echoes, errs, everyoneBurst+1)
+		}
+		if got := len(drain(t, bob)); got != everyoneBurst+1 {
+			t.Errorf("bob got %d chats, want %d everyone and the direct one", got, everyoneBurst)
+		}
+
+		time.Sleep(time.Second / everyoneRate)
+		send("e-late", chat.Everyone, "")
+		synctest.Wait()
+		if got := drain(t, bob); !slices.Contains(got, typeChat) {
+			t.Errorf("after refill bob got %v, want a chat", got)
+		}
+	})
+}
+
+// TestEveryoneFloodKeepsReaders has 100 members each fire two everyone
+// chats at once at a reader that drains nothing meanwhile: the room limit
+// and the send buffer together must keep the reader connected.
+func TestEveryoneFloodKeepsReaders(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		room := runLineRoom(t, nil)
+		reader := joinAs(t, room, "Reader")
+		senders := make([]*Session, 100)
+		for i := range senders {
+			senders[i] = joinAs(t, room, "s"+strconv.Itoa(i))
+		}
+		synctest.Wait()
+		for _, s := range senders {
+			drain(t, s)
+		}
+		for i := range 2 {
+			for _, s := range senders {
+				if err := room.chat(t.Context(), sessionChat{sess: s, cid: "c" + strconv.Itoa(i), scope: chat.Everyone, text: strings.Repeat("x", 400)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		synctest.Wait()
+		select {
+		case <-reader.done:
+			t.Fatalf("reader closed: %+v", reader.closeWith)
+		default:
+		}
+		chats := 0
+		for _, typ := range drain(t, reader) {
+			if typ == typeChat {
+				chats++
+			}
+		}
+		if chats != everyoneBurst {
+			t.Errorf("reader got %d chats, want the room's burst of %d", chats, everyoneBurst)
+		}
+	})
 }

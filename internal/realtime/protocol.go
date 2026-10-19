@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,15 +229,21 @@ func jsonError(err error) error {
 	return errors.New("malformed")
 }
 
+// encode leaves <, > and & as they are: clients parse JSON and show text
+// with textContent only, never as HTML, and escaping would make chat text up
+// to six times larger.
 func encode(t string, d any) ([]byte, error) {
-	b, err := json.Marshal(struct {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(struct {
 		T string `json:"t"`
 		D any    `json:"d"`
 	}{t, d})
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", t, err)
 	}
-	return b, nil
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
 // encodeState splices pre-encoded positions into a per-recipient envelope so
