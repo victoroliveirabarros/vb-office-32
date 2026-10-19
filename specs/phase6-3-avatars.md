@@ -52,6 +52,7 @@ Score 14 (complexo): arte nova com animação, protocolo novo (aparência), UI d
 ## Divisão
 
 - **6.3a — arte e pipeline:** `internal/avatar` (catálogo: contagens, paletas, rótulos pt-BR, chaves, pools do padrão; fonte única importada pelo gerador e pelo servidor), arte em grade de texto, `tools/officeart/avatars.go`, PNG/TS/CSS gerados, golden, folha de conferência + GIF andando. **Portão: usuário aprova a folha/GIF.**
+  - Estado (2026-10-19): implementada — `internal/avatar`, `art/custom/avatar/*.txt`, `tools/officeart/avatars.go` (`make art`; `-sheet` gera `avatars.png`, `avatar-parts.png` e `avatars.gif`), PNG/TS/CSS gerados com golden; **aguarda aprovação da folha/GIF**.
 - **6.3b — servidor e protocolo** (depende só de `internal/avatar`).
 - **6.3c — renderização no cliente** (depende de 6.3a e 6.3b).
 - **6.3d — editor** (depende de 6.3c).
