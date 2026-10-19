@@ -8,9 +8,10 @@ const KIND_HINT: Record<ZoneKind, string> = {
   private: 'Só quem está aqui ouve, vê e lê o chat “Perto”.',
 }
 
-/** "Sala 1 — reunião". */
+/** "Ringue de box — privada"; just "Sala privada" when the name says it. */
 export function zoneText(room: Room): string {
-  return `${room.name} — ${KIND_TEXT[room.kind]}`
+  const kind = KIND_TEXT[room.kind]
+  return room.name.toLocaleLowerCase('pt-BR').includes(kind) ? room.name : `${room.name} — ${kind}`
 }
 
 export function zoneHint(room: Room): string {
