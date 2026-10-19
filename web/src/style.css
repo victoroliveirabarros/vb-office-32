@@ -29,6 +29,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f27; fon
 .media-button.error::after { content: "!"; position: absolute; top: -2px; right: -2px; width: 14px; height: 14px; border-radius: 50%; background: #f2b84b; color: #1d1f27; font: bold 10px/14px system-ui, sans-serif; }
 .media-button:disabled { opacity: 0.6; cursor: default; }
 #media-unlock { padding: 8px 12px; border-radius: 20px; }
+#media-screen { padding: 8px 12px; border-radius: 20px; white-space: nowrap; }
+#media-screen[aria-pressed="true"] { background: #a63d40; }
+#media-screen:disabled { opacity: 0.6; cursor: default; }
+#media-stage { position: fixed; top: 140px; bottom: 80px; left: 16px; right: 16px; max-width: 1280px; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #000; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); z-index: 3; }
+#media-stage[hidden] { display: none; }
+#media-stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+#media-stage span { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); color: #fff; font: 12px system-ui, sans-serif; }
 #media-note { padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat { position: fixed; right: 16px; bottom: 16px; z-index: 6; color: #eee; font: 13px system-ui, sans-serif; }
 .chat[hidden], .chat [hidden] { display: none; }

@@ -43,6 +43,25 @@ describe('parseServerMessage', () => {
     expect(parseServerMessage('{"t":"nearby","d":{"ids":["a",2]}}')).toBeNull()
   })
 
+  it('parses zones, treating unknown kinds as private', () => {
+    expect(parseServerMessage('{"t":"zone","d":{"id":"sala-1","name":"Sala 1","kind":"meeting"}}')).toEqual({
+      t: 'zone',
+      d: { id: 'sala-1', name: 'Sala 1', kind: 'meeting' },
+    })
+    expect(parseServerMessage('{"t":"zone","d":{"id":"cab","name":"Cabine","kind":"lounge"}}')).toEqual({
+      t: 'zone',
+      d: { id: 'cab', name: 'Cabine', kind: 'private' },
+    })
+    expect(parseServerMessage('{"t":"zone","d":{"id":"cab"}}')).toEqual({ t: 'zone', d: { id: 'cab', kind: 'private' } })
+    expect(parseServerMessage('{"t":"zone","d":{"id":"","name":"x","kind":"meeting"}}')).toEqual({ t: 'zone', d: { id: '' } })
+  })
+
+  it('rejects malformed zones', () => {
+    expect(parseServerMessage('{"t":"zone","d":{}}')).toBeNull()
+    expect(parseServerMessage('{"t":"zone","d":{"id":1}}')).toBeNull()
+    expect(parseServerMessage('{"t":"zone","d":{"id":"a","name":2}}')).toBeNull()
+  })
+
   it('parses chat messages, keeping only known fields', () => {
     const everyone = { id: 'k1', at: 1767269400000, from: 'guest:ana', fromName: 'Ana', scope: 'everyone', text: '<b>oi</b>' }
     expect(parseServerMessage(JSON.stringify({ t: 'chat', d: { ...everyone, extra: 1 } }))).toEqual({ t: 'chat', d: everyone })

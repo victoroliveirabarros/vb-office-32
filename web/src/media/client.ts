@@ -1,13 +1,15 @@
 import type { Tile } from '../game/grid'
 import { backoffDelay } from '../net/connection'
 import type { ConnectionStatus } from '../net/connection'
-import type { Media, ServerMessage } from '../net/protocol'
+import type { Media, ServerMessage, Zone } from '../net/protocol'
+import { AllowedSubscribers } from './permissions'
 import type { MediaPrefs } from './prefs'
 import { distance, nearest, VIDEO_LIMIT, volumeAt } from './proximity'
 import { disconnectAction } from './reconnect'
 import type { DisconnectKind } from './reconnect'
+import { canShare, inMeeting, screenTarget, sharers, shouldStop } from './screen'
 import { subscriptionChanges, videoCandidates } from './subscriptions'
-import type { Publication, TrackKind } from './subscriptions'
+import type { Publication, TrackSource } from './subscriptions'
 
 export type DeviceError = 'denied' | 'not-found' | 'in-use' | 'other'
 
@@ -19,7 +21,7 @@ export class DeviceFailure extends Error {
 
 export type RemoteMedia = {
   identity: string
-  kind: TrackKind
+  source: TrackSource
   attach(): HTMLMediaElement
 }
 
@@ -29,9 +31,11 @@ export type RoomListener = {
   reconnected(): void
   disconnected(kind: DisconnectKind): void
   subscribed(media: RemoteMedia): void
-  unsubscribed(identity: string, kind: TrackKind): void
+  unsubscribed(identity: string, source: TrackSource): void
   speakers(ids: string[]): void
   playback(allowed: boolean): void
+  // The local screen share ended, from the browser's own stop button too.
+  screenEnded(): void
 }
 
 // MediaRoom is the slice of a LiveKit Room the client drives; livekit.ts
@@ -43,10 +47,15 @@ export interface MediaRoom {
   participants(): string[]
   publications(): Publication[]
   setSubscribed(identity: string, sid: string, subscribed: boolean): void
+  // Only these identities may receive our tracks; LiveKit enforces it.
+  setAllowedSubscribers(ids: readonly string[]): void
   setVolume(identity: string, volume: number): void
   setMicrophoneEnabled(on: boolean): Promise<void>
   // Returns the local preview while the camera is on.
   setCameraEnabled(on: boolean): Promise<HTMLMediaElement | null>
+  // Resolves whether the screen is shared now: false when the picker was
+  // cancelled.
+  setScreenShareEnabled(on: boolean): Promise<boolean>
   startAudio(): Promise<void>
 }
 
@@ -56,21 +65,28 @@ export type LinkState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | '
 
 export type DeviceState = { on: boolean; busy: boolean; error: DeviceError | null }
 
+// meeting: we are in a meeting room; taken: someone else there shares.
+export type ScreenState = DeviceState & { meeting: boolean; taken: boolean }
+
 export interface MediaView {
   setLink(state: LinkState): void
   setMic(state: DeviceState): void
   setCamera(state: DeviceState): void
+  setScreen(state: ScreenState): void
   setPlaybackBlocked(blocked: boolean): void
   addAudio(el: HTMLMediaElement): void
   showVideo(identity: string, name: string, el: HTMLMediaElement): void
   hideVideo(identity: string): void
   showSelfVideo(el: HTMLMediaElement | null): void
+  showScreen(identity: string, name: string, el: HTMLMediaElement): void
+  hideScreen(identity: string): void
   clear(): void
 }
 
 export type MediaControls = {
   toggleMic(): void
   toggleCamera(): void
+  toggleScreen(): void
   startAudio(): void
 }
 
@@ -95,15 +111,23 @@ export class MediaClient implements MediaControls {
   private selfId: string | null = null
   private readonly players = new Map<string, Placed>()
   private nearby: ReadonlySet<string> = new Set()
+  // Who may receive our tracks: nearby while the game socket is up, nobody
+  // from a welcome until the next nearby.
+  private permitted: ReadonlySet<string> = new Set()
+  private readonly allowed = new AllowedSubscribers()
+  private zone: Zone | null = null
   private readonly volumes = new Map<string, number>()
   private speakers: readonly string[] = []
   private speaking: ReadonlySet<string> = new Set()
   private readonly speakingListeners = new Set<SpeakingListener>()
   private mic: DeviceState
   private camera: DeviceState = { on: false, busy: false, error: null }
+  private screen: DeviceState = { on: false, busy: false, error: null }
+  private screenTaken = false
   // What the room carries; null when a failed call left it unknown.
   private micLive: boolean | null = false
   private cameraLive: boolean | null = false
+  private screenLive: boolean | null = false
   // Bumped whenever the room is dropped, so late results are ignored.
   private session = 0
   private readonly createRoom: RoomFactory
@@ -135,6 +159,8 @@ export class MediaClient implements MediaControls {
         this.selfId = msg.d.selfId
         this.players.clear()
         for (const p of msg.d.players) this.players.set(p.id, { name: p.name, x: p.x, y: p.y })
+        this.permitted = new Set()
+        this.applyPermissions()
         return this.sync(false)
       case 'joined':
         this.players.set(msg.d.id, { name: msg.d.name, x: msg.d.x, y: msg.d.y })
@@ -146,15 +172,24 @@ export class MediaClient implements MediaControls {
         return this.onState(msg.d.players)
       case 'media':
         return this.onMedia(msg.d)
+      case 'zone':
+        return this.onZone(msg.d)
       case 'nearby':
         this.nearby = new Set(msg.d.ids)
+        this.permitted = this.nearby
+        this.applyPermissions()
         this.sync(true)
         return this.emitSpeaking()
     }
   }
 
-  // The game socket dropping keeps the room: the next nearby reconciles it.
+  // The game socket dropping keeps the room, but nobody may receive us
+  // until the server places us again; the next nearby reconciles it.
   setConnectionStatus(status: ConnectionStatus): void {
+    if (status !== 'open') {
+      this.permitted = new Set()
+      this.applyPermissions()
+    }
     if (status === 'replaced' || status === 'expired') this.stop()
   }
 
@@ -185,6 +220,15 @@ export class MediaClient implements MediaControls {
     void this.applyCamera()
   }
 
+  // Must run inside the click handler: the screen picker needs a gesture.
+  toggleScreen(): void {
+    if (this.screen.busy) return
+    const on = !this.screen.on
+    if (on && !canShare(this.zone, this.link === 'connected', this.screenTaken)) return
+    this.setScreen({ on, busy: false, error: null })
+    void this.applyScreen()
+  }
+
   // Must run inside the click handler: browsers unlock audio on a gesture.
   startAudio(): void {
     const room = this.room
@@ -205,12 +249,23 @@ export class MediaClient implements MediaControls {
     if (relevant) this.sync(false)
   }
 
+  private onZone(zone: Zone): void {
+    this.zone = zone.id === '' ? null : zone
+    if (this.screen.on && !this.screen.busy && shouldStop(this.zone)) {
+      this.screen = { on: false, busy: false, error: null }
+      void this.applyScreen()
+    }
+    this.renderScreen()
+    this.sync(false)
+  }
+
   private onMedia(grant: Media): void {
     if (this.link === 'stopped') return
     this.grant = grant
     this.grantAt = this.now()
     this.view.setMic(this.mic)
     this.view.setCamera(this.camera)
+    this.renderScreen()
     if (this.link === 'idle' || this.link === 'waiting') void this.connect()
   }
 
@@ -231,6 +286,8 @@ export class MediaClient implements MediaControls {
         }
         this.room = room
       }
+      // Nobody may subscribe until the server says who is near.
+      this.sendPermissions([], true)
       await room.connect(grant.url, grant.token)
     } catch {
       if (session === this.session) this.lost('other')
@@ -241,6 +298,7 @@ export class MediaClient implements MediaControls {
       return
     }
     this.attempt = 0
+    this.sendPermissions(this.permitted, true)
     this.setLink('connected')
     this.view.setPlaybackBlocked(!room.canPlaybackAudio)
     this.sync(true)
@@ -283,17 +341,44 @@ export class MediaClient implements MediaControls {
     },
     subscribed: (media) => {
       const el = media.attach()
-      if (media.kind === 'audio') return this.view.addAudio(el)
-      this.view.showVideo(media.identity, this.players.get(media.identity)?.name ?? media.identity, el)
+      const name = this.players.get(media.identity)?.name ?? media.identity
+      switch (media.source) {
+        case 'microphone':
+          return this.view.addAudio(el)
+        case 'camera':
+          return this.view.showVideo(media.identity, name, el)
+        case 'screen':
+          return this.view.showScreen(media.identity, name, el)
+      }
     },
-    unsubscribed: (identity, kind) => {
-      if (kind === 'video') this.view.hideVideo(identity)
-    },
+    unsubscribed: (identity, source) => this.hide(identity, source),
     speakers: (ids) => {
       this.speakers = ids
       this.emitSpeaking()
     },
     playback: (allowed) => this.view.setPlaybackBlocked(!allowed),
+    screenEnded: () => {
+      if (this.screen.busy) return
+      this.screenLive = false
+      if (this.screen.on) this.setScreen({ on: false, busy: false, error: null })
+    },
+  }
+
+  private hide(identity: string, source: TrackSource): void {
+    if (source === 'camera') this.view.hideVideo(identity)
+    else if (source === 'screen') this.view.hideScreen(identity)
+  }
+
+  private applyPermissions(): void {
+    this.sendPermissions(this.permitted, false)
+  }
+
+  private sendPermissions(ids: Iterable<string>, force: boolean): void {
+    const room = this.room
+    if (!room || this.link === 'stopped') return
+    if (force) this.allowed.reset()
+    const list = this.allowed.update(ids)
+    if (list) room.setAllowedSubscribers(list)
   }
 
   private sync(full: boolean): void {
@@ -301,16 +386,25 @@ export class MediaClient implements MediaControls {
     if (!room || (this.link !== 'connected' && this.link !== 'reconnecting')) return
 
     const pubs = room.publications()
-    const watched = new Set(pubs.filter((p) => p.kind === 'video' && p.desired).map((p) => p.identity))
-    const video = nearest(videoCandidates(pubs, this.nearby), (id) => this.distanceTo(id), VIDEO_LIMIT, watched)
-    for (const change of subscriptionChanges(pubs, this.nearby, video)) {
+    const watched = new Set(pubs.filter((p) => p.source === 'camera' && p.desired).map((p) => p.identity))
+    const camera = nearest(videoCandidates(pubs, this.nearby), (id) => this.distanceTo(id), VIDEO_LIMIT, watched)
+    const current = pubs.find((p) => p.source === 'screen' && p.desired)?.identity ?? null
+    const target = screenTarget(pubs, this.nearby, this.zone, current)
+    const screen = new Set(target === null ? [] : [target])
+    for (const change of subscriptionChanges(pubs, { microphone: this.nearby, camera, screen })) {
       room.setSubscribed(change.identity, change.sid, change.subscribe)
-      if (change.kind === 'video' && !change.subscribe) this.view.hideVideo(change.identity)
+      if (!change.subscribe) this.hide(change.identity, change.source)
+    }
+    const taken = sharers(pubs, this.nearby).size > 0
+    if (taken !== this.screenTaken) {
+      this.screenTaken = taken
+      this.renderScreen()
     }
 
+    // Inside a zone nearby is the whole room, which hears itself in full.
     if (full) this.volumes.clear()
     for (const id of full ? room.participants() : this.nearby) {
-      const volume = this.nearby.has(id) ? volumeAt(this.distanceTo(id)) : 0
+      const volume = this.nearby.has(id) ? (this.zone ? 1 : volumeAt(this.distanceTo(id))) : 0
       if (this.volumes.get(id) === volume) continue
       this.volumes.set(id, volume)
       room.setVolume(id, volume)
@@ -378,7 +472,42 @@ export class MediaClient implements MediaControls {
     await this.applyCamera()
   }
 
+  // A share never restarts by itself: the picker needs a gesture.
+  private async applyScreen(): Promise<void> {
+    const room = this.room
+    const on = this.screen.on
+    if (!room || this.screen.busy || this.screenLive === on || !this.canApply(on)) return
+    const session = this.session
+    this.setScreen({ on, busy: true, error: null })
+    let live = false
+    let error: DeviceError | null = null
+    try {
+      live = await room.setScreenShareEnabled(on)
+    } catch (err) {
+      error = deviceError(err)
+    }
+    if (session !== this.session) {
+      if (live) void room.setScreenShareEnabled(false).catch(() => {})
+      return
+    }
+    if (error) {
+      this.screenLive = on ? false : null
+      return this.setScreen({ on: false, busy: false, error })
+    }
+    this.screenLive = live
+    this.setScreen({ on: live && !shouldStop(this.zone), busy: false, error: null })
+    await this.applyScreen()
+  }
+
+  private renderScreen(): void {
+    this.view.setScreen({ ...this.screen, meeting: inMeeting(this.zone), taken: this.screenTaken })
+  }
+
   private resetMedia(): void {
+    this.allowed.reset()
+    this.screenLive = false
+    this.screenTaken = false
+    this.setScreen({ on: false, busy: false, error: null })
     this.volumes.clear()
     this.speakers = []
     this.emitSpeaking()
@@ -399,6 +528,11 @@ export class MediaClient implements MediaControls {
   private setCamera(state: DeviceState): void {
     this.camera = state
     this.view.setCamera(state)
+  }
+
+  private setScreen(state: DeviceState): void {
+    this.screen = state
+    this.renderScreen()
   }
 
   private emitSpeaking(): void {

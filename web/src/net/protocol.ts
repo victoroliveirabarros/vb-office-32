@@ -35,6 +35,11 @@ export type Media = { url: string; token: string; expiresAt: number }
 /** Full set of players in earshot of the recipient, sorted, without itself. */
 export type Nearby = { ids: string[] }
 
+export type ZoneKind = 'meeting' | 'private'
+
+/** The recipient's own zone; id "" means outside every zone. */
+export type Zone = { id: string; name?: string; kind?: ZoneKind }
+
 /** at is unix milliseconds; to only on direct; cid only on the sender's echo. */
 export type Chat = {
   id: string
@@ -57,6 +62,7 @@ export type ServerMessage =
   | { t: 'pong'; d: { ts: number } }
   | { t: 'media'; d: Media }
   | { t: 'nearby'; d: Nearby }
+  | { t: 'zone'; d: Zone }
   | { t: 'chat'; d: Chat }
   | { t: 'chatHistory'; d: { messages: Chat[] } }
   | { t: 'chatError'; d: ChatError }
@@ -101,6 +107,10 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return isMedia(d) ? { t: 'media', d: { url: d.url, token: d.token, expiresAt: d.expiresAt } } : null
     case 'nearby':
       return isNearby(d) ? { t: 'nearby', d: { ids: d.ids } } : null
+    case 'zone': {
+      const zone = toZone(d)
+      return zone ? { t: 'zone', d: zone } : null
+    }
     case 'chat': {
       const chat = toChat(d)
       return chat ? { t: 'chat', d: chat } : null
@@ -147,6 +157,16 @@ function isMedia(d: Record<string, unknown>): d is Media {
 
 function isNearby(d: Record<string, unknown>): d is Nearby {
   return Array.isArray(d.ids) && d.ids.every(isString)
+}
+
+// A kind unknown to this client is treated as the most restrictive one.
+function toZone(d: Record<string, unknown>): Zone | null {
+  if (!isString(d.id)) return null
+  if (d.id === '') return { id: '' }
+  if (d.name != null && !isString(d.name)) return null
+  const zone: Zone = { id: d.id, kind: d.kind === 'meeting' ? 'meeting' : 'private' }
+  if (isString(d.name)) zone.name = d.name
+  return zone
 }
 
 export function isChatScope(v: unknown): v is ChatScope {
