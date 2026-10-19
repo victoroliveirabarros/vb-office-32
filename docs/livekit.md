@@ -65,6 +65,17 @@ stands outside, even at the door, cannot receive anything from inside.
   indicators only reach those subscribed. `not_allowed` is the normal
   state for someone not yet near, not an error (the client logs it at debug
   level when it lasts more than 3 seconds).
+- **Revocation needs the publisher's signaling.** Only the publisher can
+  change its permissions. While its signaling connection is reconnecting
+  (`SignalReconnecting`, a resume) the SDK queues the update and media
+  already forwarded keeps flowing until the connection is back; a full
+  reconnect sends the permissions again before republishing anything.
+- **The edge on entering.** Permissions follow `nearby`, so whoever was
+  near someone in the open area keeps receiving them for one permission
+  round trip after they step into a room: about 220 to 270 ms from their
+  `zone` message to the last bytes, measured with a modified client that
+  keeps subscribing. What leaks is the first quarter second said inside the
+  door; that limit is accepted.
 - **Modified clients.** A subscriber that asks for everything still sees
   who is in the room and what they publish, but gets no media and no
   speaking indicator. A modified publisher can only expose itself. Who is
@@ -102,6 +113,26 @@ about 100 ms after the media has already stopped.
   entering a `private` one) stops the share; so do the browser's own "stop
   sharing" button and the room dropping. Cancelling the picker is not an
   error. A share never restarts by itself, since the picker needs a click.
+- **Leaving with a screen on air.** Stopping a share is asynchronous
+  (unpublishing takes a negotiation, and the picker or the publish may still
+  be pending at the door), while the open area's `nearby` arrives right
+  after `zone`. So outside a meeting room, while the screen is live or a
+  share call is pending, the client only ever narrows its permissions (it
+  sends the intersection of the last list and the new `nearby`) and widens
+  them to the whole `nearby` once the screen is off the air. A share whose
+  picker resolves after leaving is unpublished first. Per-track
+  permissions (leaving the screen's track out) were discarded: every
+  publish, and every full reconnect, changes the track IDs, so the list
+  would have to follow each one, and a gap would block the microphone.
+- **Reconnects.** A full reconnect unpublishes and republishes every track,
+  the screen included, without stopping its capture; only a capture that
+  really ended (the browser's button, our own stop) ends the share. Once
+  reconnected the client asks the room whether the screen is on air,
+  follows it, and stops it if it should not be (outside a meeting room or
+  turned off meanwhile).
+- **Two shares at once.** Two people may click within the same round trip,
+  before either sees the other's screen. Whoever has the larger identity
+  stops theirs and is told that someone in the room started first.
 - Published at 720p and 5 fps (`ScreenSharePresets.h720fps5`, capped at
   800 kbit/s, `contentHint: detail`) with a 360p layer at up to
   200 kbit/s, the SDK default for screens; dynacast pauses whichever layer
