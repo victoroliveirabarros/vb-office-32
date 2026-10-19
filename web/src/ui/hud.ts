@@ -10,7 +10,7 @@ export type Hud = {
 
 export function createHud(): Hud {
   const status = requireElement('status', HTMLDivElement)
-  const latency = requireElement('latency', HTMLDivElement)
+  const latency = requireElement('latency', HTMLSpanElement)
   const zone = requireElement('zone', HTMLDivElement)
   const zoneStatus = requireElement('zone-status', HTMLDivElement)
   let room: Room | null = null

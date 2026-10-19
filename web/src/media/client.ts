@@ -3,6 +3,7 @@ import type { Tile } from '../game/grid'
 import { backoffDelay } from '../net/connection'
 import type { ConnectionStatus } from '../net/connection'
 import type { Media, ServerMessage, Zone } from '../net/protocol'
+import type { DeviceKind, DevicePrefs } from './devices'
 import { AllowedSubscribers } from './permissions'
 import type { MediaPrefs } from './prefs'
 import { distance, nearest, VIDEO_LIMIT, volumeAt } from './proximity'
@@ -60,6 +61,9 @@ export interface MediaRoom {
   // reconnect.
   screenShared(): boolean
   startAudio(): Promise<void>
+  // Switches the device of a kind, also for later captures.
+  switchDevice(kind: DeviceKind, id: string): Promise<void>
+  activeDevice(kind: DeviceKind): string | undefined
 }
 
 export type RoomFactory = (listener: RoomListener) => Promise<MediaRoom>
@@ -100,10 +104,13 @@ export type MediaControls = {
 
 export type SpeakingListener = (ids: ReadonlySet<string>) => void
 
+export type LinkListener = (state: LinkState) => void
+
 export type MediaClientOptions = {
   createRoom: RoomFactory
   view: MediaView
   prefs: MediaPrefs
+  devices?: DevicePrefs
   now?: () => number
 }
 
@@ -128,6 +135,7 @@ export class MediaClient implements MediaControls {
   private speakers: readonly string[] = []
   private speaking: ReadonlySet<string> = new Set()
   private readonly speakingListeners = new Set<SpeakingListener>()
+  private readonly linkListeners = new Set<LinkListener>()
   private mic: DeviceState
   private camera: DeviceState = { on: false, busy: false, error: null }
   private screen: ShareState = { on: false, busy: false, error: null }
@@ -141,12 +149,14 @@ export class MediaClient implements MediaControls {
   private readonly createRoom: RoomFactory
   private readonly view: MediaView
   private readonly prefs: MediaPrefs
+  private readonly devices: DevicePrefs | undefined
   private readonly now: () => number
 
   constructor(options: MediaClientOptions) {
     this.createRoom = options.createRoom
     this.view = options.view
     this.prefs = options.prefs
+    this.devices = options.devices
     this.now = options.now ?? Date.now
     this.mic = { on: !this.prefs.micMuted(), busy: false, error: null }
   }
@@ -159,6 +169,27 @@ export class MediaClient implements MediaControls {
     this.speakingListeners.add(fn)
     fn(this.speaking)
     return () => this.speakingListeners.delete(fn)
+  }
+
+  onLink(fn: LinkListener): () => void {
+    this.linkListeners.add(fn)
+    fn(this.link)
+    return () => this.linkListeners.delete(fn)
+  }
+
+  /** Remembers the choice and switches to it while connected; failures keep the current device. */
+  async selectDevice(kind: DeviceKind, id: string): Promise<boolean> {
+    this.devices?.save(kind, id)
+    const room = this.room
+    if (!room || this.link === 'stopped') return false
+    return room.switchDevice(kind, id).then(
+      () => true,
+      () => false,
+    )
+  }
+
+  activeDevice(kind: DeviceKind): string | undefined {
+    return this.room?.activeDevice(kind)
   }
 
   handle(msg: ServerMessage): void {
@@ -552,6 +583,7 @@ export class MediaClient implements MediaControls {
   private setLink(link: LinkState): void {
     this.link = link
     this.view.setLink(link)
+    this.linkListeners.forEach((fn) => fn(link))
   }
 
   private setMic(state: DeviceState): void {

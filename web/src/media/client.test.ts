@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Player, ServerMessage } from '../net/protocol'
 import { DeviceFailure, MediaClient } from './client'
 import type { DeviceState, LinkState, MediaRoom, MediaView, RoomListener, ScreenState } from './client'
+import type { DeviceKind } from './devices'
 import type { MediaPrefs } from './prefs'
 import type { Publication, TrackSource } from './subscriptions'
 
@@ -91,6 +92,15 @@ class FakeRoom implements MediaRoom {
   async startAudio(): Promise<void> {
     this.audioStarts++
     this.canPlaybackAudio = true
+  }
+  readonly devices = new Map<DeviceKind, string>()
+  deviceError: Error | null = null
+  async switchDevice(kind: DeviceKind, id: string): Promise<void> {
+    if (this.deviceError) throw this.deviceError
+    this.devices.set(kind, id)
+  }
+  activeDevice(kind: DeviceKind): string | undefined {
+    return this.devices.get(kind)
   }
 
   publish(identity: string, source: TrackSource, muted = false): void {
@@ -255,6 +265,36 @@ describe('MediaClient', () => {
     expect(room().mic).toEqual([true])
     expect(room().camera).toEqual([])
     expect(view.mic).toEqual({ on: true, busy: false, error: null })
+  })
+
+  it('switches a device while connected, remembers it and reports the link', async () => {
+    const saved: Array<[DeviceKind, string]> = []
+    const client = new MediaClient({
+      createRoom: async (listener) => {
+        const r = new FakeRoom(listener)
+        rooms.push(r)
+        return r
+      },
+      view,
+      prefs: new MemoryPrefs(false),
+      devices: { load: () => ({}), save: (kind, id) => saved.push([kind, id]) },
+    })
+    const links: LinkState[] = []
+    client.onLink((state) => links.push(state))
+    expect(await client.selectDevice('audioinput', 'mic-2')).toBe(false)
+    expect(saved).toEqual([['audioinput', 'mic-2']])
+
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    expect(links).toEqual(['idle', 'connecting', 'connected'])
+    expect(await client.selectDevice('videoinput', 'cam-1')).toBe(true)
+    expect(client.activeDevice('videoinput')).toBe('cam-1')
+
+    room().deviceError = new Error('gone')
+    expect(await client.selectDevice('audiooutput', 'out-9')).toBe(false)
+    expect(client.activeDevice('audiooutput')).toBeUndefined()
+    expect(saved.at(-1)).toEqual(['audiooutput', 'out-9'])
   })
 
   it('remembers a muted mic and does not open it on join', async () => {

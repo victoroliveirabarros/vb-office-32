@@ -12,9 +12,9 @@ import { Avatar } from '../entities/Avatar'
 import { Grid } from '../game/grid'
 import { Predictor, correctionFor } from '../game/prediction'
 import { ZoneMap } from '../game/zones'
-import { cameraBounds, followCenter, keepOnScreen, overviewCenter, textResolution, Zoom, zoomPrefs } from '../game/zoom'
+import { cameraBounds, followCenter, keepOnScreen, OVERVIEW, overviewCenter, textResolution, Zoom, zoomPrefs } from '../game/zoom'
 import type { Point, Rect, Size } from '../game/zoom'
-import type { MapZone } from '../game/zones'
+import type { MapZone, TileRect } from '../game/zones'
 import type { Connection } from '../net/connection'
 import type { Dir, Player, Pos, ServerMessage, State, Welcome } from '../net/protocol'
 import type { Hud } from '../ui/hud'
@@ -56,7 +56,15 @@ const ACCENT = 0xfdc339
 const SIGN_HEIGHT = 16
 const SIGN_INSET = 6
 const SIGN_MIN_SCREEN = 0.8
+// "Ver no mapa": how long the mark stays, and how fast it pulses.
+const SPOTLIGHT_MS = 4000
+const SPOTLIGHT_FADE_MS = 400
+const SPOTLIGHT_PULSE_MS = 1000
+const SPOTLIGHT_DEPTH = 5000
+const NAVY = 0x00263e
 const { LINEAR, NEAREST } = Phaser.Textures.FilterMode
+
+type Spotlight = { draw(g: Phaser.GameObjects.Graphics, zoom: number, pulse: number): void; from: number }
 
 type ZoneView = {
   zone: MapZone
@@ -89,6 +97,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private signsInside = false
   private smoothTiles = false
   private following = false
+  private spotlight: Spotlight | null = null
+  private spotlightGraphics!: Phaser.GameObjects.Graphics
 
   constructor(
     private readonly connection: Connection,
@@ -131,6 +141,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       keyboardFree: () => !this.typing.typing,
     })
 
+    this.spotlightGraphics = this.add.graphics().setDepth(SPOTLIGHT_DEPTH)
     this.keys = this.createKeys()
     this.applyTyping()
     // Overlapping avatars: a click picks the one drawn on top.
@@ -166,7 +177,44 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     if (this.typing.set(owner, on)) this.applyTyping()
   }
 
+  /** Goes to the overview and marks someone for a few seconds. */
+  showPerson(id: string): void {
+    const avatar = this.avatars.get(id)
+    if (!avatar) return
+    this.toOverview()
+    this.spot((g, zoom, pulse) => {
+      const art = keepOnScreen(2, zoom)
+      const x = avatar.x
+      const y = avatar.y + TILE_SIZE / 2 - (FRAME_HEIGHT * art) / 2
+      const r = (FRAME_HEIGHT * art) / 2 + 10 / zoom
+      g.lineStyle(6 / zoom, NAVY, 0.6).strokeCircle(x, y, r)
+      g.lineStyle(3 / zoom, ACCENT, 1).strokeCircle(x, y, r)
+      if (pulse >= 0) g.lineStyle(3 / zoom, ACCENT, 1 - pulse).strokeCircle(x, y, r * (1 + 0.7 * pulse))
+    })
+  }
+
+  /** Goes to the overview and marks a room or area for a few seconds. */
+  showPlace(tiles: TileRect): void {
+    this.toOverview()
+    const x = tiles.x0 * TILE_SIZE
+    const y = tiles.y0 * TILE_SIZE
+    const w = (tiles.x1 - tiles.x0) * TILE_SIZE
+    const h = (tiles.y1 - tiles.y0) * TILE_SIZE
+    this.spot((g, zoom, pulse) => {
+      const glow = pulse >= 0 ? 0.14 + 0.16 * Math.sin(pulse * Math.PI) : 0.22
+      g.fillStyle(ACCENT, glow).fillRect(x, y, w, h)
+      g.lineStyle(6 / zoom, NAVY, 0.5).strokeRoundedRect(x, y, w, h, 8 / zoom)
+      g.lineStyle(3 / zoom, ACCENT, 1).strokeRoundedRect(x, y, w, h, 8 / zoom)
+    })
+  }
+
+  /** Forgets the picked level, as the 0 key does. */
+  resetZoom(): void {
+    this.zoomBy(() => this.zoom.reset())
+  }
+
   update(time: number): void {
+    this.drawSpotlight()
     if (this.typing.typing) return
     if (!this.predictor || !this.connection.isOpen || time < this.nextStepAt) return
     const dir = this.heldDir()
@@ -202,6 +250,30 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       case 'appearance':
         return this.avatars.get(msg.d.id)?.setAppearance(msg.d.appearance)
     }
+  }
+
+  // The overview a mark is shown in is not a pick: the saved level stays.
+  private toOverview(): void {
+    if (this.zoom.set(OVERVIEW)) this.applyZoom(true)
+  }
+
+  private spot(draw: Spotlight['draw']): void {
+    this.spotlight = { draw, from: this.time.now }
+  }
+
+  private drawSpotlight(): void {
+    const g = this.spotlightGraphics
+    g.clear()
+    const spot = this.spotlight
+    if (!spot) return
+    const age = this.time.now - spot.from
+    if (age > SPOTLIGHT_MS) {
+      this.spotlight = null
+      return
+    }
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    g.setAlpha(reduced ? 1 : Math.min(1, (SPOTLIGHT_MS - age) / SPOTLIGHT_FADE_MS))
+    spot.draw(g, this.cameras.main.zoom, reduced ? -1 : (age % SPOTLIGHT_PULSE_MS) / SPOTLIGHT_PULSE_MS)
   }
 
   private onWelcome(welcome: Welcome): void {

@@ -94,4 +94,14 @@ describe('TypingOwners', () => {
     expect(owners.set('editor', false)).toBe(false)
     expect(owners.set('chat', false)).toBe(true)
   })
+
+  it('tells which owners hold the keyboard', () => {
+    const owners = new TypingOwners()
+    owners.set('sidebar', true)
+    expect(owners.typing).toBe(true)
+    expect(owners.holds('sidebar')).toBe(true)
+    expect(owners.holds('chat')).toBe(false)
+    owners.set('sidebar', false)
+    expect(owners.holds('sidebar')).toBe(false)
+  })
 })

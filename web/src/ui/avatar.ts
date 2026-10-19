@@ -5,11 +5,11 @@ import type { Category, Field } from '../avatar/catalog.gen'
 import { composeStrip, drawFrame } from '../avatar/compose'
 import { describe, EditorState } from '../avatar/editor'
 import { frameFor, frameIndex } from '../avatar/frames'
+import { loadParts } from '../avatar/parts'
 import type { AvatarPrefs } from '../avatar/prefs'
 import type { TypingGate } from '../chat/keys'
 import type { Connection } from '../net/connection'
 import type { Dir, ServerMessage } from '../net/protocol'
-import { AVATAR_PARTS_URL } from '../scenes/assets'
 import { requireElement } from './dom'
 
 export type AvatarLink = Pick<Connection, 'send' | 'onMessage'>
@@ -23,12 +23,6 @@ const TURN: readonly Dir[] = ['down', 'left', 'up', 'right']
 const THUMB_HEIGHT = 13
 
 type Choice = { field: Field; index: number; input: HTMLInputElement; thumb: HTMLCanvasElement | null }
-
-function loadParts(): Promise<HTMLImageElement> {
-  const img = new Image()
-  img.src = AVATAR_PARTS_URL
-  return img.decode().then(() => img)
-}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
@@ -59,10 +53,11 @@ function choiceFor(cat: Category, index: number): { label: HTMLLabelElement; cho
 }
 
 /**
- * The "Personalizar" button and its dialog: a draft of the look with an
- * animated preview, saved in the browser and sent to the server.
+ * The avatar editor: a dialog with a draft of the look and an animated
+ * preview, saved in the browser and sent to the server. The sidebar's
+ * Avatar item, enabled from the welcome on, opens it.
  */
-export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: TypingGate): void {
+export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: TypingGate): { open(): void } {
   const button = requireElement('avatar-edit', HTMLButtonElement)
   const dialog = requireElement('avatar-editor', HTMLDialogElement)
   const options = requireElement('avatar-options', HTMLDivElement)
@@ -160,6 +155,7 @@ export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: T
   }
 
   function open(): void {
+    if (dialog.open || button.disabled) return
     state.open()
     tick = 0
     facing = 0
@@ -186,8 +182,6 @@ export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: T
   }
 
   link.onMessage(handle)
-  button.hidden = false
-  button.addEventListener('click', open)
 
   turn.addEventListener('click', () => {
     facing++
@@ -228,4 +222,6 @@ export function createAvatarEditor(link: AvatarLink, prefs: AvatarPrefs, gate: T
     },
     () => undefined,
   )
+
+  return { open }
 }

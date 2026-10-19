@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_APPEARANCE } from '../avatar/appearance'
 import { ZoneMap } from '../game/zones'
 import type { Player, ServerMessage } from '../net/protocol'
 import { Roster } from './roster'
@@ -24,7 +25,7 @@ describe('Roster', () => {
     const roster = new Roster()
     roster.handle(welcome('z', [player('z', 'Zé'), player('b', 'bruno'), player('a', 'Álvaro'), player('c', 'Ana')]))
     expect(roster.list().map((p) => p.name)).toEqual(['Zé', 'Álvaro', 'Ana', 'bruno'])
-    expect(roster.list()[0]).toEqual({ id: 'z', name: 'Zé', label: 'Zé', self: true, nearby: false, room: null })
+    expect(roster.list()[0]).toEqual({ id: 'z', name: 'Zé', label: 'Zé', self: true, nearby: false, room: null, area: null, look: DEFAULT_APPEARANCE })
   })
 
   it('breaks name ties by id so the order is stable', () => {
@@ -101,6 +102,41 @@ describe('Roster', () => {
     roster.handle({ t: 'zone', d: { id: 'cab', name: 'Cabine', kind: 'private' } })
     roster.handle({ t: 'joined', d: player('a', 'Ana', 3, 0) })
     expect(roster.inOurRoom('a')).toBe(true)
+  })
+
+  it('names the part of the open floor everyone is on, ourselves included', () => {
+    // Tiles 0–4 × 3 are the kitchen; 0–1 × 0–1 still a room.
+    const map = new ZoneMap(5, 5, zones.zones, [
+      { id: 'copa', name: 'Copa', tiles: { x0: 0, y0: 3, x1: 5, y1: 4 } },
+      { id: 'sala', name: 'Under the room', tiles: { x0: 0, y0: 0, x1: 1, y1: 1 } },
+    ])
+    const roster = new Roster()
+    roster.setZones(map)
+    roster.handle(welcome('s', [player('s', 'Eu', 4, 4), player('a', 'Ana', 2, 3)]))
+    expect(roster.areaOf('a')).toEqual({ id: 'copa', name: 'Copa' })
+    expect(roster.areaOf('s')).toBeNull()
+    expect(roster.handle(moved('s', 4, 3))).toBe(true)
+    expect(roster.areaOf('s')?.name).toBe('Copa')
+    expect(roster.handle(moved('s', 3, 3))).toBe(false)
+    expect(roster.tileOf('s')).toEqual({ x: 3, y: 3 })
+    // A room wins over an area drawn under it.
+    expect(roster.handle(moved('a', 0, 0))).toBe(true)
+    expect(roster.areaOf('a')).toBeNull()
+    expect(roster.list().find((p) => p.id === 'a')).toMatchObject({ room: SALA, area: null })
+  })
+
+  it('follows looks from the welcome, joins and changes', () => {
+    const look = { skin: 1, hair: 2, hairColor: 3, shirt: 4, pants: 1, acc: 2 }
+    const roster = new Roster()
+    roster.handle(welcome('s', [{ ...player('s', 'Eu'), appearance: look }, player('a', 'Ana')]))
+    expect(roster.lookOf('s')).toEqual(look)
+    expect(roster.lookOf('a')).toEqual(DEFAULT_APPEARANCE)
+    expect(roster.handle({ t: 'appearance', d: { id: 'a', appearance: look } })).toBe(true)
+    expect(roster.handle({ t: 'appearance', d: { id: 'a', appearance: look } })).toBe(false)
+    expect(roster.handle({ t: 'appearance', d: { id: 'ghost', appearance: look } })).toBe(false)
+    expect(roster.list().find((p) => p.id === 'a')?.look).toEqual(look)
+    roster.handle({ t: 'left', d: { id: 'a' } })
+    expect(roster.lookOf('a')).toEqual(DEFAULT_APPEARANCE)
   })
 
   it('tells repeated names apart in labels only', () => {

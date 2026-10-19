@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_APPEARANCE } from '../avatar/appearance'
 import { clean } from '../chat/clean'
 import type { Person } from '../chat/roster'
 import type { Tab } from '../chat/state'
@@ -17,7 +18,17 @@ const roster = (names: Record<string, string>, nearby: string[] = [], room: Room
   inOurRoom: (id: string) => room !== null && nearby.includes(id),
 })
 
-const person = (over: Partial<Person>): Person => ({ id: 'a', name: 'Ana', label: 'Ana', self: false, nearby: false, room: null, ...over })
+const person = (over: Partial<Person>): Person => ({
+  id: 'a',
+  name: 'Ana',
+  label: 'Ana',
+  self: false,
+  nearby: false,
+  room: null,
+  area: null,
+  look: DEFAULT_APPEARANCE,
+  ...over,
+})
 
 const tab = (over: Partial<Tab>): Tab => ({ key: 'everyone', scope: 'everyone', peer: null, peerName: '', entries: [], unread: 0, ...over })
 const dm = tab({ key: 'dm:guest:ana', scope: 'direct', peer: 'guest:ana', peerName: 'Ana antiga' })

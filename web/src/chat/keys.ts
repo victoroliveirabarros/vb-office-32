@@ -57,9 +57,9 @@ export function atBottom(el: ScrollLike, slack = 8): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= slack
 }
 
-export type TypingOwner = 'chat' | 'editor'
+export type TypingOwner = 'chat' | 'editor' | 'sidebar'
 
-/** Lets the chat or the avatar editor take the keyboard away from the game. */
+/** Lets the chat, the avatar editor or a field of the sidebar take the keyboard away from the game. */
 export type TypingGate = { setTyping(owner: TypingOwner, on: boolean): void }
 
 /** Who holds the keyboard; the game gets it back when nobody does. */
@@ -68,6 +68,10 @@ export class TypingOwners {
 
   get typing(): boolean {
     return this.owners.size > 0
+  }
+
+  holds(owner: TypingOwner): boolean {
+    return this.owners.has(owner)
   }
 
   /** Reports whether typing changed. */

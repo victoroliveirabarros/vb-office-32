@@ -107,4 +107,34 @@ describe('ZoneMap', () => {
     // The kitchen is open: no zone, opening included.
     for (const [x, y] of [[27, 2], [32, 7], [32, 9], [37, 8]] as const) expect(map.zoneAt(x, y)).toBeNull()
   })
+
+  it('reads named areas of the open floor apart from the zones', () => {
+    const area = (id: string, x: number, y: number, w: number, h: number) => ({ ...zone(id, x, y, w, h), properties: [{ name: 'id', value: id }] })
+    const map = ZoneMap.fromTiled({
+      ...tiled([zone('a', 0, 0, 64, 64)]),
+      layers: [
+        { name: 'zones', type: 'objectgroup', objects: [zone('a', 0, 0, 64, 64)] },
+        { name: 'areas', type: 'objectgroup', objects: [area('copa', 64, 0, 64, 64), area('copa', 0, 128, 32, 32), area('x', 96, 0, 64, 32), { name: '', x: 0, y: 0 }] },
+      ],
+    })
+    expect(map.zones.map((z) => z.id)).toEqual(['a'])
+    expect(map.areas).toEqual([{ id: 'copa', name: 'COPA', tiles: { x0: 2, y0: 0, x1: 4, y1: 2 } }])
+    expect(map.areaAt(3, 1)?.id).toBe('copa')
+    expect(map.areaAt(0, 0)).toBeNull()
+    expect(map.areaAt(0, 4)).toBeNull()
+    expect(map.areaById('copa')?.name).toBe('COPA')
+    expect(map.areaById('x')).toBeNull()
+    expect(ZoneMap.fromTiled(tiled([])).areas).toEqual([])
+  })
+
+  it('names the kitchen and the open office of maps/office.tmj', () => {
+    const map = ZoneMap.fromTiled(JSON.parse(office))
+    expect(map.areas.map((a) => [a.id, a.name, a.tiles])).toEqual([
+      ['copa', 'Copa', { x0: 27, y0: 1, x1: 38, y1: 9 }],
+      ['escritorio', 'Escritório aberto', { x0: 12, y0: 10, x1: 38, y1: 24 }],
+    ])
+    expect(map.areaAt(32, 5)?.id).toBe('copa')
+    expect(map.areaAt(24, 16)?.id).toBe('escritorio')
+    expect(map.areaAt(32, 9)).toBeNull()
+  })
 })
