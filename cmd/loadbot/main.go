@@ -25,6 +25,10 @@ import (
 
 var dirs = [...]string{"up", "down", "left", "right"}
 
+// readLimit fits the largest server message, a chatHistory of 100 chats of
+// up to 500 runes, about 200 KiB; the library default of 32 KiB does not.
+const readLimit = 1 << 20
+
 type config struct {
 	url      string
 	n        int
@@ -145,6 +149,7 @@ func runBot(ctx context.Context, cfg config, i int, st *stats) error {
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(readLimit)
 	if _, _, err := conn.Read(ctx); err != nil {
 		return fmt.Errorf("read welcome: %w", err)
 	}
