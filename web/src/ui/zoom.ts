@@ -11,7 +11,7 @@ export type ZoomActions = {
   keyboardFree(): boolean
 }
 
-export type ZoomShown = { level: number; min: number; max: number; manual: boolean }
+export type ZoomShown = { level: number; overview: boolean; canIn: boolean; canOut: boolean; manual: boolean }
 
 export type ZoomView = {
   /** Shows the controls and wires the gestures; the returned function undoes it. */
@@ -30,9 +30,10 @@ export function createZoomControls(): ZoomView {
   const zoomOut = requireElement('zoom-out', HTMLButtonElement)
   const reset = requireElement('zoom-reset', HTMLButtonElement)
   const level = requireElement('zoom-level', HTMLSpanElement)
+  const value = requireElement('zoom-level-value', HTMLSpanElement)
   const status = requireElement('zoom-status', HTMLSpanElement)
   const game = requireElement('game', HTMLDivElement)
-  let shown: number | null = null
+  let shown: string | null = null
 
   // aria-disabled keeps a button that hits a limit focused.
   const enable = (button: HTMLButtonElement, on: boolean) => button.setAttribute('aria-disabled', String(!on))
@@ -71,13 +72,13 @@ export function createZoomControls(): ZoomView {
         { signal },
       )
 
-      // Only Ctrl/⌘ + wheel (and the trackpad pinch, which arrives as one)
-      // is ours; a plain wheel keeps its default.
+      // Over the map every wheel zooms: a plain one, Ctrl/⌘ + wheel and the
+      // trackpad pinch, which arrives as one. The chat and the panels lie
+      // outside #game and keep their scrolling.
       const wheel = new WheelSteps()
       game.addEventListener(
         'wheel',
         (e) => {
-          if (!e.ctrlKey && !e.metaKey) return
           e.preventDefault()
           const step = wheel.push(e.deltaY, e.deltaMode, e.timeStamp)
           if (step !== 0) actions.step(step)
@@ -123,13 +124,16 @@ export function createZoomControls(): ZoomView {
       }
     },
 
-    show({ level: zoom, min, max, manual }) {
-      level.textContent = `${zoom}×`
-      enable(zoomIn, zoom < max)
-      enable(zoomOut, zoom > min)
+    show({ level: zoom, overview, canIn, canOut, manual }) {
+      const label = overview ? 'Visão geral' : `${zoom}×`
+      value.textContent = overview ? '' : label
+      level.toggleAttribute('data-overview', overview)
+      level.title = overview ? 'Visão geral do escritório' : ''
+      enable(zoomIn, canIn)
+      enable(zoomOut, canOut)
       enable(reset, manual)
-      if (shown !== null && shown !== zoom) status.textContent = `Zoom ${zoom}×`
-      shown = zoom
+      if (shown !== null && shown !== label) status.textContent = overview ? 'Visão geral do escritório' : `Zoom ${zoom}×`
+      shown = label
     },
   }
 }

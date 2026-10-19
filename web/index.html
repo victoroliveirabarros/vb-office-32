@@ -25,8 +25,11 @@
       <button id="zoom-in" class="zoom-button" type="button" aria-label="Aproximar" title="Aproximar (+)" aria-keyshortcuts="+">
         <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-in" /></svg>
       </button>
-      <span id="zoom-level" class="zoom-level" aria-hidden="true"></span>
-      <button id="zoom-out" class="zoom-button" type="button" aria-label="Afastar" title="Afastar (−)" aria-keyshortcuts="-">
+      <span id="zoom-level" class="zoom-level" aria-hidden="true">
+        <span id="zoom-level-value" class="zoom-level-value"></span>
+        <svg class="icon zoom-overview"><use href="/icons.svg#map" /></svg>
+      </span>
+      <button id="zoom-out" class="zoom-button" type="button" aria-label="Afastar" title="Afastar (−), até a visão geral" aria-keyshortcuts="-">
         <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-out" /></svg>
       </button>
       <button id="zoom-reset" class="zoom-button zoom-reset" type="button" aria-label="Zoom padrão" title="Zoom padrão (0)" aria-keyshortcuts="0">

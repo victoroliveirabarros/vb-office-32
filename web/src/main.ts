@@ -18,6 +18,8 @@ import { createHud } from './ui/hud'
 import type { Hud } from './ui/hud'
 import { createAvatarEditor } from './ui/avatar'
 import { createChat } from './ui/chat'
+import { coverOf } from './ui/cover'
+import { requireElement } from './ui/dom'
 import { askName } from './ui/join'
 import { showLogin, showLogout } from './ui/login'
 import { createMediaView } from './ui/media'
@@ -81,6 +83,7 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>): Pro
     zonesLoaded: (zones) => chat.setZones(zones),
     picked: (id) => chat.openDirect(id),
     zoom: createZoomControls(),
+    cover: coverOf(requireElement('chat-panel', HTMLElement)),
   })
 
   await font
@@ -90,7 +93,7 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>): Pro
     transparent: true,
     pixelArt: true,
     roundPixels: true,
-    // Only Ctrl/⌘ + wheel is the game's (zoom); see ui/zoom.ts.
+    // The wheel over the map zooms; ui/zoom.ts cancels its default there.
     input: { mouse: { preventDefaultWheel: false } },
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
     scene: [new BootScene(hud), office],

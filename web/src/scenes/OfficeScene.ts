@@ -12,8 +12,8 @@ import { Avatar } from '../entities/Avatar'
 import { Grid } from '../game/grid'
 import { Predictor, correctionFor } from '../game/prediction'
 import { ZoneMap } from '../game/zones'
-import { cameraBounds, textResolution, Zoom, zoomPrefs } from '../game/zoom'
-import type { Size } from '../game/zoom'
+import { cameraBounds, followCenter, keepOnScreen, overviewCenter, textResolution, Zoom, zoomPrefs } from '../game/zoom'
+import type { Point, Rect, Size } from '../game/zoom'
 import type { MapZone } from '../game/zones'
 import type { Connection } from '../net/connection'
 import type { Dir, Player, Pos, ServerMessage, State, Welcome } from '../net/protocol'
@@ -40,15 +40,27 @@ export type SceneHooks = {
   /** Someone else's avatar was clicked. */
   picked?(id: string): void
   zoom?: ZoomView
+  /** A panel over the map, which the overview keeps clear of. */
+  cover?: CoverSource
+}
+
+export type CoverSource = {
+  /** The part of the screen it covers, or null while closed. */
+  rect(): Rect | null
+  onChange(fn: () => void): () => void
 }
 
 const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x014c8b, private: 0x7a3fb0 }
 // Yellow reads on every room's floor: blue and slate carpets, rubber.
 const ACCENT = 0xfdc339
 const SIGN_HEIGHT = 16
+const SIGN_INSET = 6
+const SIGN_MIN_SCREEN = 0.8
+const { LINEAR, NEAREST } = Phaser.Textures.FilterMode
 
 type ZoneView = {
   zone: MapZone
+  area: Phaser.Geom.Rectangle
   outline: Phaser.GameObjects.Graphics
   sign: Phaser.GameObjects.Container
   label: Phaser.GameObjects.Text
@@ -73,6 +85,10 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private zoom!: Zoom
   private mapSize: Size = { width: 0, height: 0 }
   private pinchEndedAt = -Infinity
+  private markerZoom = 0
+  private signsInside = false
+  private smoothTiles = false
+  private following = false
 
   constructor(
     private readonly connection: Connection,
@@ -98,6 +114,9 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
 
     this.mapSize = { width: map.widthInPixels, height: map.heightInPixels }
     this.zoom = new Zoom(this.mapSize, this.viewSize(), this.zoomPrefs.load())
+    const cover = this.hooks.cover
+    if (cover) this.zoom.cover(cover.rect())
+    const offCover = cover?.onChange(() => this.covered(cover.rect()))
     this.applyZoom(false)
     this.scale.on(Phaser.Scale.Events.RESIZE, this.resized, this)
     const offZoom = this.hooks.zoom?.bind({
@@ -127,6 +146,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       offStatus()
       offSpeaking?.()
       offZoom?.()
+      offCover?.()
       this.scale.off(Phaser.Scale.Events.RESIZE, this.resized, this)
     })
 
@@ -197,7 +217,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const avatar = this.self()
     if (!self || !avatar) return
     this.predictor = new Predictor(this.grid, self)
-    this.cameras.main.startFollow(avatar, true)
+    this.following = false
+    this.placeCamera()
   }
 
   private onState(state: State): void {
@@ -256,13 +277,38 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private drawZones(zones: ZoneMap): void {
     this.zoneViews = zones.zones.map((zone) => {
       const { x0, y0, x1, y1 } = zone.tiles
-      const [x, y, w, h] = [x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE]
-      const color = ZONE_COLORS[zone.kind]
-      const outline = this.add.graphics().setDepth(4).lineStyle(2, ACCENT, 0.85).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
-      const [sign, label] = this.zoneSign(zone.name, color)
-      sign.setPosition(x + 6, Math.max(SIGN_HEIGHT / 2, y - TILE_SIZE / 2))
-      return { zone, outline, sign, label }
+      const area = new Phaser.Geom.Rectangle(x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE)
+      const outline = this.add.graphics().setDepth(4)
+      const [sign, label] = this.zoneSign(zone.name, ZONE_COLORS[zone.kind])
+      return { zone, area, outline, sign, label }
     })
+    this.highlightZone()
+  }
+
+  // Below 1× the outline keeps its 1× size on screen and so do the signs.
+  // Once a sign no longer fits the wall above its room it moves into the
+  // room's bottom corner, opaque, out of the way of the names over people's
+  // heads, and shrinks to SIGN_MIN_SCREEN of its size where the room is too
+  // narrow for it, never past the map's edge.
+  private scaleZones(zoom: number): void {
+    const scale = keepOnScreen(1, zoom)
+    this.signsInside = SIGN_HEIGHT * scale > TILE_SIZE
+    for (const { area, outline, sign } of this.zoneViews) {
+      const inset = 2 * scale
+      outline
+        .clear()
+        .lineStyle(2 * scale, ACCENT, 0.85)
+        .strokeRoundedRect(area.x + inset, area.y + inset, area.width - 2 * inset, area.height - 2 * inset, 8 * scale)
+      if (!this.signsInside) {
+        sign.setScale(scale).setPosition(area.x + SIGN_INSET, Math.max((SIGN_HEIGHT * scale) / 2, area.y - TILE_SIZE / 2))
+        continue
+      }
+      const margin = SIGN_INSET * scale
+      const fits = (area.width - 2 * margin) / sign.width
+      const signScale = Math.max(keepOnScreen(1, zoom, SIGN_MIN_SCREEN), Math.min(scale, fits))
+      const x = Math.min(area.x + margin, this.mapSize.width - margin - sign.width * signScale)
+      sign.setScale(signScale).setPosition(x, area.bottom - margin - (SIGN_HEIGHT * signScale) / 2)
+    }
     this.highlightZone()
   }
 
@@ -284,14 +330,14 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       .fillRoundedRect(0, -SIGN_HEIGHT / 2, width, SIGN_HEIGHT, 4)
       .fillStyle(ACCENT, 1)
       .fillCircle(9, 0, 3)
-    return [this.add.container(0, 0, [plate, text]).setDepth(4), text]
+    return [this.add.container(0, 0, [plate, text]).setSize(width, SIGN_HEIGHT).setDepth(4), text]
   }
 
   private highlightZone(): void {
     for (const { zone, outline, sign } of this.zoneViews) {
       const here = zone.id === this.zoneId
       outline.setVisible(here)
-      sign.setAlpha(here ? 1 : 0.8)
+      sign.setAlpha(here || this.signsInside ? 1 : 0.8)
     }
   }
 
@@ -348,7 +394,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   }
 
   private textResolution(): number {
-    return textResolution(this.cameras.main.zoom, window.devicePixelRatio)
+    const { zoom } = this.cameras.main
+    return textResolution(zoom * keepOnScreen(1, zoom), window.devicePixelRatio)
   }
 
   private pickedByPinch(): boolean {
@@ -362,19 +409,34 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     this.applyZoom(true)
   }
 
+  // A panel anchored to a corner moves with the window.
   private resized(): void {
-    if (this.zoom.resize(this.viewSize())) return this.applyZoom(false)
+    const before = this.zoom.level
+    this.zoom.cover(this.hooks.cover?.rect() ?? null)
+    this.zoom.resize(this.viewSize())
+    if (this.zoom.level !== before) return this.applyZoom(false)
     this.showZoom()
-    this.fitBounds()
+    this.placeCamera()
+  }
+
+  // In the overview the map moves out from under a panel opened over it;
+  // the whole levels do not depend on it.
+  private covered(rect: Rect | null): void {
+    this.zoom.cover(rect)
+    if (this.zoom.overview) this.applyZoom(true)
   }
 
   private showZoom(): void {
-    const { min, max } = this.zoom.range
-    this.hooks.zoom?.show({ level: this.zoom.level, min, max, manual: this.zoom.chosen !== null })
+    const { level, overview, canZoomIn, canZoomOut, chosen } = this.zoom
+    this.hooks.zoom?.show({ level, overview, canIn: canZoomIn, canOut: canZoomOut, manual: chosen !== null })
   }
 
-  // The zoom glides between levels and always lands on a whole one, where
-  // the pixel art stays crisp; the texts are redrawn for it once there.
+  // The zoom glides between levels and lands on a whole one, where the pixel
+  // art stays crisp, or on the overview, which fits the whole office in the
+  // free part of the screen and leaves the avatar to walk on its own. Into
+  // and out of the overview the camera pans too, to the office's middle or
+  // back to where following the avatar puts it. The texts are redrawn for
+  // the level once there.
   private applyZoom(animate: boolean): void {
     this.showZoom()
     const level = this.zoom.level
@@ -382,24 +444,84 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     if (!animate || reduced) {
       camera.zoomEffect.reset()
+      camera.panEffect.reset()
       camera.setZoom(level)
+      this.placeCamera()
       this.zoomed()
       return
     }
+    const target = this.zoom.overview ? this.overviewCenter(level) : this.following ? null : this.followCenter(level)
+    if (target) {
+      this.unfollow()
+      camera.pan(target.x, target.y, ZOOM_MS, 'Quad.easeOut', true)
+    }
     camera.zoomTo(level, ZOOM_MS, 'Quad.easeOut', true, (_: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-      if (progress < 1) this.fitBounds()
-      else this.zoomed()
+      if (progress < 1) return this.rescale()
+      this.placeCamera()
+      this.zoomed()
     })
   }
 
   private zoomed(): void {
-    this.fitBounds()
+    this.rescale()
     const resolution = this.textResolution()
     this.avatars.forEach((avatar) => avatar.refreshLabel())
     for (const { label } of this.zoneViews) {
       label.setResolution(resolution)
-      label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR)
+      label.texture.setFilter(LINEAR)
     }
+  }
+
+  // Follows the camera's zoom on every frame of a change. Below 1× the
+  // office's art is scaled down smoothly instead of dropping pixels, and
+  // what marks people and rooms keeps its size on screen.
+  private rescale(): void {
+    if (this.following) this.fitBounds()
+    const { zoom } = this.cameras.main
+    this.avatars.forEach((avatar) => avatar.scaleTo(zoom))
+    const smooth = zoom < 1
+    if (smooth !== this.smoothTiles) {
+      this.smoothTiles = smooth
+      this.textures.get(TILES_KEY).setFilter(smooth ? LINEAR : NEAREST)
+    }
+    if (zoom !== this.markerZoom) {
+      this.markerZoom = zoom
+      this.scaleZones(zoom)
+    }
+  }
+
+  // The overview holds the office still in the free area; every other
+  // level follows the avatar within the map.
+  private placeCamera(): void {
+    const camera = this.cameras.main
+    if (this.zoom.overview) {
+      this.unfollow()
+      const { x, y } = this.overviewCenter(camera.zoom)
+      camera.centerOn(x, y)
+      return
+    }
+    this.fitBounds()
+    const avatar = this.self()
+    if (!avatar || this.following) return
+    camera.startFollow(avatar, true)
+    this.following = true
+  }
+
+  private unfollow(): void {
+    const camera = this.cameras.main
+    camera.stopFollow()
+    camera.removeBounds()
+    this.following = false
+  }
+
+  private overviewCenter(zoom: number): Point {
+    return overviewCenter(this.viewSize(), this.mapSize, zoom, this.zoom.free)
+  }
+
+  private followCenter(zoom: number): Point {
+    const avatar = this.self()
+    const target = avatar ? { x: avatar.x, y: avatar.y } : { x: this.mapSize.width / 2, y: this.mapSize.height / 2 }
+    return followCenter(this.viewSize(), this.mapSize, zoom, target)
   }
 
   private fitBounds(): void {

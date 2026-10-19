@@ -1,9 +1,10 @@
 import Phaser from 'phaser'
 import { DEFAULT_APPEARANCE, sameAppearance } from '../avatar/appearance'
 import type { Appearance } from '../avatar/appearance'
+import { FRAME_HEIGHT } from '../avatar/catalog.gen'
 import { frameFor, frameIndex } from '../avatar/frames'
 import type { LookCache } from '../avatar/looks'
-import { textResolution } from '../game/zoom'
+import { keepOnScreen, textResolution } from '../game/zoom'
 import type { Facing } from '../game/grid'
 import type { Dir, Player } from '../net/protocol'
 import { TILE_SIZE } from '../scenes/assets'
@@ -14,18 +15,23 @@ const LABEL_ALPHA = 0.85
 const LABEL_PAD_X = 5
 const LABEL_PAD_Y = 1
 // The 16×24 art is drawn at 2×: feet on the bottom of the tile, the head in
-// the tile above, the name just over it.
+// the tile above, the name just over it. Below 1× (the overview) the art
+// keeps at least its own size on screen and the name its 1× size.
 const SCALE = 2
 const FEET = TILE_SIZE / 2
-const LABEL_BOTTOM = -34
+const NAME_GAP = 2
 const RING_Y = FEET - 4
 const DEPTH = 10
+const { LINEAR, NEAREST } = Phaser.Textures.FilterMode
 
 export class Avatar extends Phaser.GameObjects.Container {
   private readonly sprite: Phaser.GameObjects.Sprite
   private readonly label: Phaser.GameObjects.Text
   private readonly labelBg: Phaser.GameObjects.Graphics
+  private readonly tag: Phaser.GameObjects.Container
   private readonly ring: Phaser.GameObjects.Ellipse
+  private zoom: number
+  private smooth = false
   private motion: Phaser.Tweens.Tween | null = null
   private current: Facing
   private look: Appearance
@@ -42,26 +48,28 @@ export class Avatar extends Phaser.GameObjects.Container {
     this.current = { x: player.x, y: player.y, dir: player.dir }
     this.look = player.appearance ?? DEFAULT_APPEARANCE
     this.lookKey = looks.acquire(this.look)
+    this.zoom = scene.cameras.main.zoom
 
     this.ring = scene.add.ellipse(0, RING_Y, 24, 8).setStrokeStyle(2, SPEAKING_COLOR).setVisible(false)
     this.sprite = scene.add
       .sprite(0, FEET, this.lookKey)
       .setOrigin(0.5, 1)
-      .setScale(SCALE)
     this.labelBg = scene.add.graphics()
     this.label = scene.add
-      .text(0, LABEL_BOTTOM - LABEL_PAD_Y, player.name, {
+      .text(0, -LABEL_PAD_Y, player.name, {
         fontFamily: '"Montserrat", system-ui, sans-serif',
         fontSize: '11px',
         fontStyle: '700',
         color: '#ffffff',
-        resolution: labelResolution(scene),
+        resolution: this.labelResolution(),
       })
       .setOrigin(0.5, 1)
+    this.tag = scene.add.container(0, 0, [this.labelBg, this.label])
+    this.scaleTo(this.zoom)
     this.drawLabel()
     this.showFrame()
 
-    this.add([this.ring, this.sprite, this.labelBg, this.label])
+    this.add([this.ring, this.sprite, this.tag])
     this.updateDepth()
     scene.add.existing(this)
     this.once(Phaser.GameObjects.Events.DESTROY, () => looks.release(this.lookKey))
@@ -72,14 +80,30 @@ export class Avatar extends Phaser.GameObjects.Container {
   }
 
   setLabel(name: string): void {
-    this.label.setResolution(labelResolution(this.scene))
+    this.label.setResolution(this.labelResolution())
     this.label.setText(name)
     this.drawLabel()
   }
 
+  /**
+   * Sizes the art and the name for the camera's zoom. Cheap enough for every
+   * frame of a zoom; the name is redrawn sharp by refreshLabel once there.
+   */
+  scaleTo(zoom: number): void {
+    this.zoom = zoom
+    const art = keepOnScreen(SCALE, zoom)
+    const name = keepOnScreen(1, zoom)
+    this.sprite.setScale(art)
+    this.ring.setScale(art / SCALE)
+    this.tag.setScale(name).setY(FEET - FRAME_HEIGHT * art - NAME_GAP * name)
+    // Art shown at a fractional scale is smoothed between its pixels.
+    const onScreen = art * zoom
+    this.setSmooth(zoom < 1 && Math.abs(onScreen - Math.round(onScreen)) > 0.01)
+  }
+
   /** Redraws the name for the camera's current zoom. */
   refreshLabel(): void {
-    this.label.setResolution(labelResolution(this.scene))
+    this.label.setResolution(this.labelResolution())
     this.drawLabel()
   }
 
@@ -90,6 +114,7 @@ export class Avatar extends Phaser.GameObjects.Container {
     this.lookKey = this.looks.acquire(look)
     this.frame = -1
     this.sprite.setTexture(this.lookKey)
+    this.applySmooth()
     this.showFrame()
     this.looks.release(old)
   }
@@ -97,13 +122,30 @@ export class Avatar extends Phaser.GameObjects.Container {
   // Every text upload resets the filter to the game's NEAREST; the name is
   // drawn at screen resolution and reads best smoothed.
   private drawLabel(): void {
-    this.label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR)
+    this.label.texture.setFilter(LINEAR)
     const w = Math.ceil(this.label.width) + LABEL_PAD_X * 2
     const h = Math.ceil(this.label.height) + LABEL_PAD_Y * 2
     this.labelBg
       .clear()
       .fillStyle(LABEL_BG, LABEL_ALPHA)
-      .fillRoundedRect(-w / 2, LABEL_BOTTOM - h, w, h, h / 2)
+      .fillRoundedRect(-w / 2, -h, w, h, h / 2)
+  }
+
+  private labelResolution(): number {
+    return textResolution(this.zoom * keepOnScreen(1, this.zoom), window.devicePixelRatio)
+  }
+
+  private setSmooth(smooth: boolean): void {
+    if (smooth === this.smooth) return
+    this.smooth = smooth
+    this.applySmooth()
+  }
+
+  // Looks are shared, so every avatar wearing one sets it the same way.
+  private applySmooth(): void {
+    const texture = this.sprite.texture
+    texture.setSmoothPixelArt(this.smooth)
+    if (!this.smooth) texture.setFilter(NEAREST)
   }
 
   // Makes the avatar clickable; fn runs on release so that focus moved by
@@ -175,8 +217,4 @@ export class Avatar extends Phaser.GameObjects.Container {
 
 function toPixel(tile: number): number {
   return tile * TILE_SIZE + TILE_SIZE / 2
-}
-
-function labelResolution(scene: Phaser.Scene): number {
-  return textResolution(scene.cameras.main.zoom, window.devicePixelRatio)
 }

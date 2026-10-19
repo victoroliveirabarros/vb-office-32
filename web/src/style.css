@@ -247,7 +247,10 @@ button, input, textarea { font: inherit; color: inherit; }
 .zoom-button:hover:not([aria-disabled="true"]) { background: var(--brand-2); }
 .zoom-button:active:not([aria-disabled="true"]) { background: var(--brand-2-hover); }
 .zoom-button[aria-disabled="true"] { color: var(--on-brand-muted); opacity: 0.5; cursor: not-allowed; }
-.zoom-level { min-width: 28px; color: var(--on-brand); font-size: var(--text-xs); font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.zoom-level { display: grid; place-items: center; min-width: 28px; height: 18px; color: var(--on-brand); font-size: var(--text-xs); font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.zoom-overview { display: none; width: 16px; height: 16px; color: var(--accent); }
+.zoom-level[data-overview] .zoom-overview { display: block; }
+.zoom-level[data-overview] .zoom-level-value { display: none; }
 .zoom-reset { margin-top: 2px; border-top: 1px solid var(--brand-2); border-radius: 0 0 var(--radius-md) var(--radius-md); }
 @media (pointer: coarse) {
   .zoom-button { width: 44px; height: 44px; }
