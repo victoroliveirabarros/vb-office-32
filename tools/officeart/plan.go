@@ -9,22 +9,26 @@ import (
 )
 
 const (
-	mapW = 40
+	mapW = 50
 	mapH = 25
 )
 
 type grid [mapH]string
 
-// Plan is the office drawn as three 40×25 character grids.
+// Plan is the office drawn as three 50×25 character grids. ~ is outside
+// the office, in the floor and solid grids alike: no floor, blocked.
 //
-// floor: , floor  w wood  1 2 3 carpets of Sala 1, Sala 2 and Cabine.
+// floor: , floor  w wood  t teal, o orange, y beige and g grey carpets
+// b boxing ring canvas, inside a grey carpet.
 // solid (blocks movement): . free  # wall  T table  D desk  K counter
 // W sink  F stove  G fridge  P plant  S sofa (2 wide)  A armchair
-// E bookshelf  V TV (2 wide).
+// E bookshelf  V TV (2 wide)  R ring post, on a corner of the canvas
+// B punching bag  N bench (2 wide).
 // decor (no collision): . nothing  c chair, facing the table or desk next
-// to it  m monitor on a desk, facing the chair next to it  a armchair
-// r runner (3 wide), on free tiles; j window  q picture  Q panel (2 wide)
-// e shelf, on wall fronts.
+// to it  m monitor on a desk, facing the chair next to it  p plant on a
+// desk  a armchair
+// r runner, on free tiles; o ring ropes, on an edge of the canvas;
+// j window  q picture  Q panel (2 wide)  e shelf, on wall fronts.
 type Plan struct {
 	Floor, Solid, Decor grid
 }
@@ -114,24 +118,57 @@ func (p *Plan) layers() (*Layers, error) {
 	return &l, nil
 }
 
+var carpets = map[byte]string{'t': "carpet-teal", 'o': "carpet-orange", 'y': "carpet-beige"}
+
 func (p *Plan) floorTile(x, y int) (string, error) {
 	c := p.Floor.at(x, y)
+	if (c == '~') != (p.Solid.at(x, y) == '~') {
+		return "", errAt(x, y, "outside in only one of floor and solid")
+	}
 	switch c {
+	case '~':
+		return "", nil
 	case ',':
 		return "floor", nil
 	case 'w':
 		return "wood", nil
-	case '1', '2', '3':
-		return nineSlice(&p.Floor, x, y, "carpet-"+string(c))
+	case 'g':
+		// The ring stands on the carpet, which runs under it.
+		return nineSlice(&p.Floor, x, y, "carpet-grey", 'g', 'b')
+	case 'b':
+		if p.ringPart(x, y) == "" {
+			return "", errAt(x, y, "ring outside a grey carpet")
+		}
+		return nineSlice(&p.Floor, x, y, "ring", 'b')
+	}
+	if name, ok := carpets[c]; ok {
+		return nineSlice(&p.Floor, x, y, name, c)
 	}
 	return "", errAt(x, y, "unknown floor %q", c)
 }
 
-// nineSlice picks the part of a rectangle of equal characters at x, y.
-func nineSlice(g *grid, x, y int, prefix string) (string, error) {
+// ringPart returns the part of the ring canvas at x, y, or "" when there is
+// none or it does not stand on a grey carpet.
+func (p *Plan) ringPart(x, y int) string {
+	if p.Floor.at(x, y) != 'b' {
+		return ""
+	}
+	if _, err := nineSlice(&p.Floor, x, y, "", 'g', 'b'); err != nil {
+		return ""
+	}
+	part, err := nineSlice(&p.Floor, x, y, "", 'b')
+	if err != nil {
+		return ""
+	}
+	return part[1:]
+}
+
+// nineSlice picks the part of a rectangle of the characters same at x, y.
+func nineSlice(g *grid, x, y int, prefix string, same ...byte) (string, error) {
+	in := func(x, y int) bool { return bytes.IndexByte(same, g.at(x, y)) >= 0 }
 	c := g.at(x, y)
-	n, s := g.at(x, y-1) == c, g.at(x, y+1) == c
-	w, e := g.at(x-1, y) == c, g.at(x+1, y) == c
+	n, s := in(x, y-1), in(x, y+1)
+	w, e := in(x-1, y), in(x+1, y)
 	if !n && !s || !w && !e {
 		return "", errAt(x, y, "%q must be at least 2×2", c)
 	}
@@ -202,6 +239,8 @@ func (p *Plan) solidTile(x, y int) (string, error) {
 		return run(&p.Solid, x, y, "shelf", 0)
 	case 'S':
 		return run(&p.Solid, x, y, "sofa", 2)
+	case 'N':
+		return run(&p.Solid, x, y, "bench", 2)
 	case 'V':
 		return run(&p.Solid, x, y, "tv", 2)
 	case 'K':
@@ -214,11 +253,17 @@ func (p *Plan) solidTile(x, y int) (string, error) {
 		return "fridge", nil
 	case 'A':
 		return "armchair", nil
-	case 'P':
-		if (x+y)%2 == 0 {
-			return "plant", nil
+	case 'B':
+		return "punching-bag", nil
+	case '~':
+		return "outside", nil
+	case 'R':
+		if part := p.ringPart(x, y); len(part) == 2 {
+			return "ring-post-" + part, nil
 		}
-		return "plant-2", nil
+		return "", errAt(x, y, "ring post off a corner of the ring")
+	case 'P':
+		return plants[(x+y)%2], nil
 	}
 	return "", errAt(x, y, "unknown solid %q", c)
 }
@@ -226,7 +271,10 @@ func (p *Plan) solidTile(x, y int) (string, error) {
 func (p *Plan) wall(x, y int) bool { return p.Solid.at(x, y) == '#' }
 
 // front reports a wall whose south side faces the room: it shows its face.
-func (p *Plan) front(x, y int) bool { return p.wall(x, y) && y+1 < mapH && !p.wall(x, y+1) }
+func (p *Plan) front(x, y int) bool {
+	s := p.Solid.at(x, y+1)
+	return p.wall(x, y) && s != 0 && s != '#' && s != '~'
+}
 
 func (p *Plan) top(x, y int) bool { return p.wall(x, y) && !p.front(x, y) }
 
@@ -258,6 +306,8 @@ func (p *Plan) wallTile(x, y int) (string, error) {
 	return name, nil
 }
 
+var plants = []string{"plant", "plant-2"}
+
 var pictures = []string{"picture", "picture-2", "picture-3"}
 
 func (p *Plan) decorTile(x, y int) (string, error) {
@@ -266,7 +316,7 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 	switch {
 	case c == '.':
 		return "", nil
-	case strings.IndexByte("car", c) >= 0 && s != '.':
+	case strings.IndexByte("caro", c) >= 0 && s != '.':
 		return "", errAt(x, y, "%q must be on a free tile", c)
 	case strings.IndexByte("jqQe", c) >= 0 && !p.front(x, y):
 		return "", errAt(x, y, "%q must be on a wall front", c)
@@ -276,6 +326,11 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 		return p.chairTile(x, y)
 	case 'm':
 		return p.monitorTile(x, y)
+	case 'p':
+		if s != 'D' {
+			return "", errAt(x, y, "desk plant must be on a desk")
+		}
+		return plants[(x+y)%2], nil
 	case 'a':
 		return "armchair", nil
 	case 'r':
@@ -288,6 +343,14 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 		return run(&p.Decor, x, y, "panel", 2)
 	case 'e':
 		return "wall-shelf", nil
+	case 'o':
+		switch p.ringPart(x, y) {
+		case "n", "s":
+			return "ring-rope-h", nil
+		case "w", "e":
+			return "ring-rope-v", nil
+		}
+		return "", errAt(x, y, "ropes off an edge of the ring")
 	}
 	return "", errAt(x, y, "unknown decor %q", c)
 }

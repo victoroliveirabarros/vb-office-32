@@ -17,13 +17,15 @@ type zone struct {
 
 // Zones and spawns are in pixels, as Tiled stores them.
 var zones = []zone{
-	{"Sala 1", "sala-1", "meeting", 32, 32, 320, 256},
-	{"Sala 2", "sala-2", "meeting", 384, 32, 320, 256},
-	{"Cabine", "cabine", "private", 736, 32, 192, 256},
+	{"Sala de reunião", "reuniao", "meeting", 384, 32, 448, 256},
+	{"Sala privada", "privada", "private", 32, 320, 320, 224},
+	{"Ringue de box", "ringue", "private", 1248, 320, 320, 224},
 }
 
+// Spawns stand on the office's walkways, at tile centers.
 var spawns = [][2]int{
-	{304, 528}, {336, 528}, {560, 528}, {592, 528}, {816, 528}, {848, 528}, {304, 720}, {560, 720},
+	{464, 400}, {624, 400}, {784, 400}, {944, 400}, {1104, 400},
+	{496, 688}, {656, 688}, {784, 688}, {912, 688}, {1072, 688},
 }
 
 type tmjMap struct {

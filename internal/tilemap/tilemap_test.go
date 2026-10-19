@@ -119,27 +119,68 @@ func TestOfficeMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Width != 40 || m.Height != 25 {
-		t.Errorf("size = %dx%d, want 40x25", m.Width, m.Height)
+	if m.Width != 50 || m.Height != 25 {
+		t.Errorf("size = %dx%d, want 50x25", m.Width, m.Height)
 	}
-	if len(m.Spawns) < 6 {
-		t.Errorf("got %d spawns, want at least 6", len(m.Spawns))
+	if len(m.Spawns) < 8 {
+		t.Errorf("got %d spawns, want at least 8", len(m.Spawns))
 	}
 
-	kinds := make(map[Kind]int)
+	want := map[string]Kind{"reuniao": Meeting, "privada": Private, "ringue": Private}
+	if len(m.Zones) != len(want) {
+		t.Errorf("zones = %+v, want %v", m.Zones, want)
+	}
 	for _, z := range m.Zones {
-		kinds[z.Kind]++
-	}
-	if kinds[Meeting] != 2 || kinds[Private] < 1 {
-		t.Errorf("zones = %+v, want 2 meeting and at least 1 private", m.Zones)
-	}
-	// Doors lead into each room but stay outside it.
-	for _, door := range []Point{{6, 9}, {17, 9}, {25, 9}, {26, 9}} {
-		if m.Blocked(door) || m.ZoneAt(door) >= 0 {
-			t.Errorf("door %v: blocked %v, zone %d", door, m.Blocked(door), m.ZoneAt(door))
+		if want[z.ID] != z.Kind {
+			t.Errorf("zone %q is %q, want %q", z.ID, z.Kind, want[z.ID])
 		}
-		if in := m.ZoneAt(door.Add(Point{Y: -1})); in < 0 {
-			t.Errorf("tile above door %v is in no zone", door)
+	}
+	zoneID := func(p Point) string {
+		if i := m.ZoneAt(p); i >= 0 {
+			return m.Zones[i].ID
+		}
+		return ""
+	}
+	// One door into each room from the office, outside the room; the tile
+	// past it is in the room.
+	for _, door := range []struct {
+		at     []Point
+		inside Point
+		zone   string
+	}{
+		{[]Point{{18, 9}, {19, 9}}, Point{Y: -1}, "reuniao"},
+		{[]Point{{11, 13}, {11, 14}}, Point{X: -1}, "privada"},
+		{[]Point{{38, 13}, {38, 14}}, Point{X: 1}, "ringue"},
+	} {
+		for _, p := range door.at {
+			if m.Blocked(p) || m.ZoneAt(p) >= 0 {
+				t.Errorf("door %v: blocked %v, zone %d", p, m.Blocked(p), m.ZoneAt(p))
+			}
+			if got := zoneID(p.Add(door.inside)); got != door.zone {
+				t.Errorf("past door %v: zone %q, want %q", p, got, door.zone)
+			}
+		}
+	}
+	// The kitchen opens wide onto the office, and neither is a zone.
+	for x := 29; x <= 35; x++ {
+		if p := (Point{x, 9}); m.Blocked(p) {
+			t.Errorf("kitchen opening %v is blocked", p)
+		}
+	}
+	for _, p := range []Point{{27, 2}, {32, 7}, {36, 8}, {32, 9}, {24, 20}, {13, 22}} {
+		if m.Blocked(p) || m.ZoneAt(p) >= 0 {
+			t.Errorf("%v: blocked %v, zone %q, want free in no zone", p, m.Blocked(p), zoneID(p))
+		}
+	}
+	for _, p := range m.Spawns {
+		if p.X < 12 || p.X > 37 || p.Y < 10 || p.Y > 23 {
+			t.Errorf("spawn %v is outside the office", p)
+		}
+	}
+	// Outside the office's outline nothing is walkable.
+	for _, p := range []Point{{0, 0}, {10, 8}, {39, 0}, {49, 8}, {0, 18}, {10, 24}, {39, 18}, {49, 24}} {
+		if !m.Blocked(p) {
+			t.Errorf("%v outside the office is free", p)
 		}
 	}
 

@@ -11,12 +11,13 @@ import { mkdtempSync, rmSync } from 'node:fs'
 const base = process.argv[2] ?? 'http://localhost:8080'
 const port = Number(process.env.CDP_PORT ?? 9333)
 
-// Tiles of maps/office.tmj: Sala 1 spans x 1–10, y 1–8, with its door at (6, 9).
-const ANA = { x: 6, y: 6 }
-const BIA = { x: 3, y: 3 }
-const DOOR = { x: 6, y: 9 }
-const INSIDE = { x: 6, y: 8 }
-const HALL = { x: 6, y: 11 }
+// Tiles of maps/office.tmj: the meeting room spans x 12–25, y 1–8, with its
+// door at (18, 9) and (19, 9).
+const ANA = { x: 18, y: 6 }
+const BIA = { x: 13, y: 3 }
+const DOOR = { x: 18, y: 9 }
+const INSIDE = { x: 18, y: 8 }
+const HALL = { x: 18, y: 11 }
 
 // Fresh names: the server keeps a returning identity where it was.
 const run = Date.now().toString(36).slice(-5)
@@ -141,7 +142,7 @@ function growth(samples) {
 async function scenario(cdp) {
   const ana = await open(cdp, 'honest', 'Ana')
   await ana.walk(ANA)
-  await ana.until(`e2e.link === 'connected' && e2e.zone === 'sala-1'`)
+  await ana.until(`e2e.link === 'connected' && e2e.zone === 'reuniao'`)
   const anaId = await ana.eval('e2e.selfId')
   await ana.eval('e2e.toggleCamera()')
   await ana.eval('e2e.toggleScreen()', true)
@@ -173,7 +174,7 @@ async function scenario(cdp) {
   await bia.walk(BIA)
   await bia.until(`e2e.events.some((e) => e.type === 'show' && e.source === 'microphone')`, 5_000)
   if (sharing) await bia.until(`e2e.events.some((e) => e.type === 'show' && e.source === 'screen')`, 5_000)
-  const biaZone = firstAfter(await bia.events('zone'), biaStart, (e) => e.id === 'sala-1')
+  const biaZone = firstAfter(await bia.events('zone'), biaStart, (e) => e.id === 'reuniao')
   const biaShows = await bia.events('show')
   results.latencies.honestEnter = {
     microphone: firstAfter(biaShows, 0, (e) => e.source === 'microphone').at - biaZone.at,
@@ -199,7 +200,7 @@ async function scenario(cdp) {
       5_000,
     )
   }
-  const eveZone = firstAfter(await eve.events('zone'), enterAt, (e) => e.id === 'sala-1')
+  const eveZone = firstAfter(await eve.events('zone'), enterAt, (e) => e.id === 'reuniao')
   const anaNear = firstAfter(await ana.events('nearby'), enterAt, (e) => e.ids.includes(eveId))
   const subs = (await eve.events('subscribed')).filter((e) => e.identity === anaId)
   results.latencies.intruderEnter = Object.fromEntries(

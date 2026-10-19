@@ -94,15 +94,17 @@ describe('ZoneMap', () => {
   it('matches maps/office.tmj as the server reads it', () => {
     const map = ZoneMap.fromTiled(JSON.parse(office))
     expect(map.zones).toEqual([
-      { id: 'sala-1', name: 'Sala 1', kind: 'meeting', tiles: { x0: 1, y0: 1, x1: 11, y1: 9 } },
-      { id: 'sala-2', name: 'Sala 2', kind: 'meeting', tiles: { x0: 12, y0: 1, x1: 22, y1: 9 } },
-      { id: 'cabine', name: 'Cabine', kind: 'private', tiles: { x0: 23, y0: 1, x1: 29, y1: 9 } },
+      { id: 'reuniao', name: 'Sala de reunião', kind: 'meeting', tiles: { x0: 12, y0: 1, x1: 26, y1: 9 } },
+      { id: 'privada', name: 'Sala privada', kind: 'private', tiles: { x0: 1, y0: 10, x1: 11, y1: 17 } },
+      { id: 'ringue', name: 'Ringue de box', kind: 'private', tiles: { x0: 39, y0: 10, x1: 49, y1: 17 } },
     ])
-    // Doors on row 9 and the hall stay outside; the tile above a door is in.
-    for (const [x, y] of [[6, 9], [17, 9], [25, 9], [26, 9], [6, 11], [9, 16]] as const) expect(map.zoneAt(x, y)).toBeNull()
-    expect(map.zoneAt(6, 8)?.id).toBe('sala-1')
-    expect(map.zoneAt(17, 8)?.id).toBe('sala-2')
-    expect(map.zoneAt(25, 8)?.id).toBe('cabine')
-    expect(map.zoneAt(11, 5)).toBeNull()
+    // Doors and the office stay outside; the tile past a door is in.
+    for (const [x, y] of [[18, 9], [19, 9], [11, 13], [11, 14], [38, 13], [38, 14], [24, 16], [12, 10]] as const)
+      expect(map.zoneAt(x, y)).toBeNull()
+    expect(map.zoneAt(18, 8)?.id).toBe('reuniao')
+    expect(map.zoneAt(10, 13)?.id).toBe('privada')
+    expect(map.zoneAt(39, 14)?.id).toBe('ringue')
+    // The kitchen is open: no zone, opening included.
+    for (const [x, y] of [[27, 2], [32, 7], [32, 9], [37, 8]] as const) expect(map.zoneAt(x, y)).toBeNull()
   })
 })
