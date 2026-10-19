@@ -25,7 +25,9 @@ function cleanText(raw: string): string {
   const runes = Array.from(raw, wellFormed)
     .join('')
     .replace(/\r\n|[\r\u0085\u{2028}\u{2029}]/gu, '\n')
-    .replace(/\t/g, ' ')
+    // Blank letters (Hangul fillers, the empty braille pattern) look like
+    // space but are not isSpace.
+    .replace(/[\t\u115F\u1160\u2800\u3164\uFFA0]/g, ' ')
   const kept = Array.from(runes).filter((r) => isJoiner(cp(r)) || !(isControl(cp(r)) || isFormat(r)))
 
   let out = ''

@@ -39,6 +39,9 @@ func TestClean(t *testing.T) {
 		{"tags", "🏴\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f", "🏴", nil},
 		{"controls", "a\x00b\x07c\x1bd\x7fe\u0080f\u009f", "abcdef", nil},
 		{"tab", "a\tb", "a b", nil},
+		{"blank letters are spaces", "a\u3164b\u2800c\u115fd\u1160e\uffa0f", "a b c d e f", nil},
+		{"blank letters trimmed", "\u3164\u2800oi\uffa0\n\u115f", "oi", nil},
+		{"only blank letters", "\u3164\u2800\u115f\u1160\uffa0\n\u3164", "", ErrEmpty},
 		{"crlf", "a\r\nb\rc", "a\nb\nc", nil},
 		{"unicode breaks", "a\u0085b\u2028c\u2029d", "a\nb\nc\nd", nil},
 		{"trailing spaces per line", "a  \nb\u00a0\t\nc", "a\nb\nc", nil},
@@ -72,7 +75,7 @@ func TestClean(t *testing.T) {
 func FuzzClean(f *testing.F) {
 	for _, s := range []string{
 		"olá", "👨\u200d👩\u200d👧", "🏳\ufe0f\u200d🌈", "می\u200cخواهم", "a\u200d\u200d\n", "\u202ex\r\n\r\n\r\n\r\ny",
-		"<b>x</b>", "a\xffb", "\t\u2028 \u0085", "🌈\u200d\u202e", " \u200d\u00a0\u200d🌈",
+		"<b>x</b>", "a\xffb", "\t\u2028 \u0085", "🌈\u200d\u202e", " \u200d\u00a0\u200d🌈", "\u3164\u2800\u115f\u1160\uffa0",
 	} {
 		f.Add(s)
 	}
@@ -99,6 +102,9 @@ func FuzzClean(f *testing.F) {
 			}
 			if r != zwj && r != zwnj && unicode.Is(unicode.Cf, r) {
 				t.Fatalf("format %U in %+q", r, out)
+			}
+			if strings.ContainsRune("\u115f\u1160\u2800\u3164\uffa0", r) {
+				t.Fatalf("blank letter %U in %+q", r, out)
 			}
 		}
 		again, err := Clean(out)
