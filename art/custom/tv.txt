@@ -1,0 +1,26 @@
+# Wall TV over a low wooden console (32x16, two tiles). CC0 1.0, vb-office-32.
+. transparent
+k 404040
+B 1f6360
+b 2e8d89
+c 41b4da
+o 8f673f
+y c8a480
+m b98b5e
+
+.kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk.
+.kcbBBBBBBBBBBBBBBBBBBBBBBBBBBk.
+.kbBBBcBBBBBBBBBBBBBBBBBBBBBBBk.
+.kBBBcBBBBBBBBBBBBBBBBBBBBBBBBk.
+.kBBcBBBBBBBBBBBBBBBBBBBBBBBBBk.
+.kBBBBBBBBBBBBBBBBBBBBBBBBBBBBk.
+.kBBBBBBBBBBBBBBBBBBBBBBBBBBBBk.
+.kBBBBBBBBBBBBBBBBBBBBBBBBBBBBk.
+.kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk.
+..............kkkk..............
+..oooooooooooooooooooooooooooo..
+..oyyyyyyyyyyyyyyyyyyyyyyyyyyo..
+..oooooooooooooooooooooooooooo..
+..ommmmmmmmmmmommmmmmmmmmmmmmo..
+..ommmmmmmmmmmommmmmmmmmmmmmmo..
+..oooooooooooooooooooooooooooo..

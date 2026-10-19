@@ -1,0 +1,24 @@
+# Fridge (16x16). CC0 1.0, vb-office-32.
+. transparent
+o 959595
+W f7f7f7
+w dfdfdf
+L c2c2c2
+l 999999
+
+..oooooooooooo..
+..oWWWWWWWWWWo..
+..oWWWWWWWWWWo..
+..oLLLLLLLLLLo..
+..owwwwwwwwwwo..
+..owwwwwwwwlwo..
+..owwwwwwwwlwo..
+..oLLLLLLLLLLo..
+..owwwwwwwwwwo..
+..owwwwwwwwlwo..
+..owwwwwwwwlwo..
+..owwwwwwwwlwo..
+..owwwwwwwwwwo..
+..oLLLLLLLLLLo..
+..oooooooooooo..
+................
