@@ -87,7 +87,7 @@ stands outside, even at the door, cannot receive anything from inside.
   `UpdateSubscriptions`/`UpdateParticipant`, which have no per-pair rule.
 
 Measured with `web/e2e/intruder.mjs` (below) against LiveKit v1.13.10 and
-Chrome headless, 13 runs on one machine. Ana sits inside Sala 1 with
+Chrome headless, 13 runs on one machine. Ana sits inside a meeting room with
 microphone, camera and screen; Eve is a modified client with a valid
 session that subscribes to everything (`autoSubscribe: true`):
 

@@ -89,7 +89,7 @@ Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby
 
 ## Zonas
 
-- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião) ou `private` (cabine). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
+- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião) ou `private` (sala privada, ringue). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
 - Quem está numa zona ouve e é ouvido por todos da mesma zona, a qualquer distância, e por ninguém de fora, nem colado na porta. Fora de zonas vale a [Proximidade](#proximidade), só entre quem também está fora.
 - Mudança de zona é imediata no tick em que o jogador cruza a borda: sem histerese, e quem sai de uma zona não herda a histerese da distância (dois que saem juntos a `d² = 25` não ficam no conjunto).
 - O jogador recebe `zone` com a zona em que está ao conectar e a cada mudança; a zona dos outros não vai no protocolo (o cliente deriva das posições e do mapa, ambos públicos — presença por sala não é segredo).
@@ -143,7 +143,7 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 ## Mapa
 
 - Arquivo: `maps/<mapId>.tmj` (Tiled JSON, orthogonal, finito). Servido em `GET /maps/<mapId>.tmj`. Fase 1: `mapId = "office"`.
-- `tilewidth = tileheight = 32`. Tamanho do escritório: 40×25.
+- `tilewidth = tileheight = 32`. Tamanho do escritório: 50×25 (até a fase 6.1, 40×25).
 - Camadas obrigatórias:
   - `floor` (tilelayer)
   - `walls` (tilelayer) — qualquer gid ≠ 0 bloqueia

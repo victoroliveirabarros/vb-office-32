@@ -24,8 +24,9 @@ alterar os desenhos.
   (sha256 `ade984d5cbe3f16d9e23e6dc516246649de1a7eec2540cf31d53852b690c446f`) e
   `License.txt` (sha256 `c360de4937c17defad37e46d85e3ddfbb3d7feed06058f9f26a11a25625850bb`).
 - **Sprites próprios** em `art/custom/` (monitor de frente, monitor de costas,
-  TV de parede 2×1 e geladeira), desenhados para este projeto na paleta Kenney
-  como grades de texto: **CC0 1.0**.
+  TV de parede 2×1, geladeira, lona, postes e cordas do ringue, saco de pancada
+  e o tile transparente de fora do prédio), desenhados para este projeto na
+  paleta Kenney como grades de texto: **CC0 1.0**.
 
 ## Fonte e ícones
 

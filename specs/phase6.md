@@ -75,6 +75,26 @@ Verificado em 2026-10-19 (licenças lidas nos `License.txt` dos zips).
 - Indoors: mesa longa 3×2 (0..2,0..1) (coluna do meio repete); mesas de 1 linha (4..7,4); oval (3..4,0..1); cadeiras (0,8) frente, (1,8) costas, (2,8) direita, (3,8) esquerda; vasos (16,0),(17,0); sofás 2×1 (14..15,7) laranja, (12..13,7) verde, (14..15,8); poltronas (8,6),(9,6); quadros (19,12..14); painéis 2×1 (20..21,12..14); espelho/quadro branco (22,14..15); passadeiras (16..18,14..17); balcões (0..9,12) com pia (8,12); fogão (14,14); geladeira (14,16..17) a confirmar. Estantes RPG (41..48,12..14).
 - **Coordenadas precisam de conferência visual**: o gerador deve emitir uma folha de conferência (PNG com índices) no scratchpad antes de fechar.
 
+## Planta nova (revisão da 6.1, vence D2 e "mesma planta lógica")
+
+A pedido do usuário, a planta passou a seguir o esboço dele (mapa 50×25, tile 32 px):
+
+```
+              ┌ reunião (14×8) ┐┌ copa (11×8) ┐
+┌ privada ───┐├──────── office (26×14) ─────┤┌ ringue ────┐
+│ 10×7       ││  15 mesas                    ││ 10×7       │
+└────────────┘│                              │└────────────┘
+              └──────────────────────────────┘
+```
+
+- Zonas: `reuniao` "Sala de reunião" `meeting` (tiles x 12..25, y 1..8); `privada` "Sala privada" `private` (x 1..10, y 10..16); `ringue` "Ringue de box" `private` (x 39..48, y 10..16). A copa (x 27..37, y 1..8) não é zona: conversa por proximidade, como no office.
+- Uma porta por sala, sempre para o office: reunião (18..19, 9), privada (11, 13..14), ringue (38, 13..14); a copa abre em (29..35, 9). Portas e os 10 spawns (faixas livres do office, linhas 12 e 21) ficam fora das zonas.
+- Fora do contorno do prédio (os quatro cantos) o tile é `~` nas grades `floor` e `solid`: sem piso e bloqueado por um tile transparente `outside` em `walls`, então aparece o fundo da página (tema claro/escuro). Paredes com `~` ao sul viram topo, não frente.
+- Office: 3 ilhas de 3×2 mesas num carpete cinza, cadeiras dos dois lados como no Gather (referência do usuário): 15 estações com cadeira e monitor (de costas para quem senta ao norte, de frente para quem senta ao sul) e uma mesa por ilha com planta (`p` no `decor`); corredores de 3 tiles entre as ilhas e faixas livres acima e abaixo; plantas, estantes, banco e quadros; reunião com mesa 6×2 de 16 lugares e TV; privada com mesa para 6; copa com geladeira, balcões, pia, fogão, mesa de 6 e cantinho com sofá, poltronas e mesinha num tapete bege.
+- Ringue: sprites próprios CC0 em `art/custom/` — `ring` (lona 9-slice com avental e frente elevada ao sul), `ring-ropes` (postes de canto vermelho/azul/brancos e cordas horizontais/verticais), `punching-bag`, `outside`. Postes bloqueiam (só os 4 cantos); cordas são `decor`, então dá para entrar e sair do ringue por qualquer lado. Banco do Kenney (Indoors (10..11, 4)).
+- Carpetes: reunião teal, privada laranja, ringue cinza (corre por baixo da lona), tapete da copa bege, cinza sob as ilhas do office.
+- Faixa de sala no HUD não repete o tipo quando o nome já o diz: "Sala de reunião", "Sala privada", "Ringue de box — privada".
+
 ## Pipeline
 
 - `tools/officeart/` (Go stdlib; não `cmd/`), `go run ./tools/officeart`, alvo `make art`. Fontes versionadas: as duas folhas PNG + `License.txt` em `art/kenney/<pack>/`, sprites próprios em `art/custom/` (não versionar zips/amostras).

@@ -55,7 +55,7 @@ on, none turns it off, and a partial set is an error.
 With the LiveKit variables set, each player gets a LiveKit token right after
 `welcome` (`media`). Media or not, the server sends each player the set of
 players within earshot (`nearby`): a pair becomes near at 4 tiles and stops
-at more than 5. Meeting rooms and private booths are zones of the map
+at more than 5. The meeting room and the private rooms are zones of the map
 (`zones` layer): inside one, earshot is everyone in the same zone at any
 distance and nobody outside, not even at the door, and each player is told
 its own zone (`zone`) at join and whenever it crosses a border. Tokens last
@@ -106,7 +106,7 @@ reach the logs. Rules and formats are in the
 
 In the browser each zone has its own carpet and a sign with its name on the
 wall above it, the room you are in gets a thin outline, and a strip at the
-top left shows it ("Sala 1 — reunião"). Inside a zone the
+top left shows it ("Ringue de box — privada"). Inside a zone the
 "Perto" tab takes the room's name and warns that only the room sees it; the
 list of people marks who is in your room ("na sala"), near you ("perto") or
 in another room, read from positions and the public map. Clicking someone's
@@ -198,12 +198,21 @@ On SIGTERM the server turns not ready, closes sessions with 1001
 
 `maps/office.tmj` and its tile atlas `web/public/game/office-tiles.png` are
 generated; do not edit them by hand. `tools/officeart` reads the floor plan
-in `tools/officeart/office.txt` (three 40×25 character grids: `floor`,
+in `tools/officeart/office.txt` (three 50×25 character grids: `floor`,
 `solid` for everything that blocks movement, and `decor` for art without
 collision, such as chairs, monitors and pictures), takes only the tiles it
 uses from the Kenney sheets in `art/kenney/` and the sprites drawn as text in
 `art/custom/`, scales them 2× with nearest neighbour to the 32 px tile and
 repeats each tile's edge pixels around it so that none bleeds into the next.
+
+The office is an open room with 15 desks in three islands with seats on
+both sides. Above it sit the meeting room (`reuniao`, a `meeting` zone
+where screens can be shared) and the kitchen, which opens wide onto the
+office and is no zone, so talk there goes by distance as in the office; on
+its left the private room for six (`privada`) and on its right the boxing
+ring (`ringue`), both `private` zones. Each room has one door to the office. Tiles marked `~` are outside
+the building: they block and are drawn see-through, so the page background
+shows around the office's outline.
 
 ```sh
 make art                                     # rewrites the map and the atlas
