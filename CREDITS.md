@@ -42,7 +42,7 @@ branco. A recoloração é obra derivada de assets CC0, também **CC0 1.0**.
 ## Avatares
 
 As partes dos avatares (`web/public/game/avatar-parts.png`: corpo, calça,
-camisa, 6 cabelos e 3 acessórios, nas vistas de baixo, de cima e de lado, parado
+camisa, 7 estilos de cabelo — um deles careca — e 3 acessórios, nas vistas de baixo, de cima e de lado, parado
 e andando) são geradas por `tools/officeart` (`make art`) a partir de
 `art/custom/avatar/`, sprites **próprios** desenhados para este projeto como
 grades de texto nas cores-chave de `internal/avatar`, recoloridos pelas paletas

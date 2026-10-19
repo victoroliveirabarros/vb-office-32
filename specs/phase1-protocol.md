@@ -139,7 +139,7 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 
 ## Aparência
 
-- `Appearance` escolhe uma opção por categoria: `skin` (pele), `hair` (estilo do cabelo), `hairColor`, `shirt`, `pants`, `acc` (acessório; 0 = nenhum). Cada campo é um índice inteiro 0–255 no catálogo `internal/avatar` (fonte única; `web/src/avatar/catalog.gen.ts` é gerado dele). Hoje: 5 peles, 6 estilos, 8 cores de cabelo, 8 camisas, 4 calças, 4 acessórios.
+- `Appearance` escolhe uma opção por categoria: `skin` (pele), `hair` (estilo do cabelo), `hairColor`, `shirt`, `pants`, `acc` (acessório; 0 = nenhum). Cada campo é um índice inteiro 0–255 no catálogo `internal/avatar` (fonte única; `web/src/avatar/catalog.gen.ts` é gerado dele). Hoje: 5 peles, 7 estilos (6 = careca, sem cor de cabelo visível), 8 cores de cabelo, 8 camisas, 4 calças, 4 acessórios.
 - O catálogo só cresce no fim: nada é removido nem reordenado, então um índice salvo mantém o significado. O cliente troca índice que não conhece por 0 ao desenhar.
 - Forma compacta (`?av=` e `localStorage`): `"skin.hair.hairColor.shirt.pants.acc"` em decimal, ex. `"2.0.5.1.3.0"`. Campos finais ausentes = 0 (`"2.0"` = `"2.0.0.0.0.0"`); vazia, mais de 6 campos, campo que não é decimal 0–255 ou fora do catálogo → inválida.
 - Padrão (sem escolha nem memória): derivado do `id`, estável e calculado só pelo servidor — FNV-1a 64 do `id` lido como número em base mista, um dígito por campo na ordem acima, sobre pools congelados (`skin` 0–4, `hair` 0–5, `hairColor` 0–6, `shirt` 0–7, `pants` 0–3, `acc` `[0,0,0,1]`). Crescer o catálogo não muda o padrão de ninguém.

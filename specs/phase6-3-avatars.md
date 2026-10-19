@@ -53,6 +53,7 @@ Score 14 (complexo): arte nova com animação, protocolo novo (aparência), UI d
 
 - **6.3a — arte e pipeline:** `internal/avatar` (catálogo: contagens, paletas, rótulos pt-BR, chaves, pools do padrão; fonte única importada pelo gerador e pelo servidor), arte em grade de texto, `tools/officeart/avatars.go`, PNG/TS/CSS gerados, golden, folha de conferência + GIF andando. **Portão: usuário aprova a folha/GIF.**
   - Estado (2026-10-19): implementada — `internal/avatar`, `art/custom/avatar/*.txt`, `tools/officeart/avatars.go` (`make art`; `-sheet` gera `avatars.png`, `avatar-parts.png` e `avatars.gif`), PNG/TS/CSS gerados com golden; **aguarda aprovação da folha/GIF**.
+  - Acréscimo (2026-10-19): estilo **Careca** (cabelo 6, `avatar.Bald`) no fim da lista; fora dos pools do padrão. Não desenha cabelo: a cabeça é a do `body` e a linha do estilo tem só o brilho do couro cabeludo (`ScalpShine`, translúcido) nas 3 vistas. No gerador, só essa linha dispensa as chaves de cor de cabelo (exige o brilho e só ele); os demais estilos seguem exigindo as chaves. No editor, com Careca o grupo "Cor do cabelo" fica desabilitado com o selo "Sem cabelo" e guarda a cor escolhida; "Aleatório" pode sortear careca e nunca devolve um careca igual ao atual só com outra cor de cabelo.
 - **6.3b — servidor e protocolo** (depende só de `internal/avatar`).
 - **6.3c — renderização no cliente** (depende de 6.3a e 6.3b).
 - **6.3d — editor** (depende de 6.3c).
@@ -61,16 +62,16 @@ Score 14 (complexo): arte nova com animação, protocolo novo (aparência), UI d
 
 - **Desenho próprio** em grade de texto (nenhuma base CC0 tem camadas + 4 direções + andar + > 1 tile). Plano B: Kenney RPG Urban/rubberduck 16×16 escalado (pipeline com tamanho de quadro configurável).
 - Quadro **16×24** desenhado → 32×48 no jogo. Vistas desenhadas: baixo, cima, direita (esquerda = espelho). 3 quadros: parado, passo A, passo B. Cabelo/acessório estáticos por vista + `bob = [0,1,1]` px por quadro. Contorno `26292e`; sombra `00000040`. Geometria: cabeça/cabelo linhas 0–10, tronco 11–17, pernas/sapatos 18–23 (linha 23 = pé no fundo do tile).
-- Camadas em `art/custom/avatar/`: `body.txt` (cabeça, rosto, sombra), `pants.txt`, `shirt.txt` (tronco, braços, mãos no tom de pele), `hair.txt` (6 estilos × 3 vistas), `acc.txt` (óculos, fone, boné × 3 vistas).
-- **Recolor por cor-chave**: cada camada desenhada com o índice 0 da paleta do papel; composição troca cores exatas por papel. Gerador falha se: chave sem uso, pixel fora de chaves/cores fixas, chaves repetidas.
+- Camadas em `art/custom/avatar/`: `body.txt` (cabeça, rosto, sombra), `pants.txt`, `shirt.txt` (tronco, braços, mãos no tom de pele), `hair.txt` (7 estilos × 3 vistas), `acc.txt` (óculos, fone, boné × 3 vistas).
+- **Recolor por cor-chave**: cada camada desenhada com o índice 0 da paleta do papel; composição troca cores exatas por papel. Gerador falha se: chave sem uso (exceto as de cabelo no estilo Careca, que não pode usá-las), pixel fora de chaves/cores fixas, chaves repetidas.
 - Paletas (claro/base/sombra; índice 0 = chave):
   - Pele (5): `F7D7BC/EDBE9A/D29A76`, `EEC08F/DCA06F/BB7F53`, `CF9564/B67A4A/935E36`, `9E6843/845332/663E25`, `6E452B/583621/402617`.
-  - Cabelo, estilos (6): Curto, Topete, Cacheado, Longo, Coque, Raspado. Cores (8): Preto `4A4850/2F2D33/1C1B1F`, Castanho-escuro `6E4A35/4E3325/352219`, Castanho `A06A40/7E4F2D/5B371F`, Ruivo `DE7A43/B9552E/8C3D20`, Loiro-escuro `DDB86A/C29848/9A7534`, Loiro `F7E6A6/E8CF7A/C4AA58`, Grisalho `D2D4D8/A9ACB2/7F838A`, Azul `5A8FC4/2F5D8A/1F3F60`.
+  - Cabelo, estilos (7): Curto, Topete, Cacheado, Longo, Coque, Raspado, Careca (sem cabelo: só o brilho do couro cabeludo; a cor do cabelo não aparece). Cores (8): Preto `4A4850/2F2D33/1C1B1F`, Castanho-escuro `6E4A35/4E3325/352219`, Castanho `A06A40/7E4F2D/5B371F`, Ruivo `DE7A43/B9552E/8C3D20`, Loiro-escuro `DDB86A/C29848/9A7534`, Loiro `F7E6A6/E8CF7A/C4AA58`, Grisalho `D2D4D8/A9ACB2/7F838A`, Azul `5A8FC4/2F5D8A/1F3F60`.
   - Camisa (8): Marinho `3F6286/1F3C5A/152B42`, Amarelo `FFD766/FDC339/D9A21F`, Branco `FFFFFF/EEF0F3/C5CBD5`, Cinza `B5BCC8/8D97A8/6B7486`, Vermelho `E07F72/C4473B/98342B`, Verde `6DB27C/3E8A52/2A6139`, Azul-claro `9ACDF6/5AA9F0/3B86CA`, Roxo `A57AD0/7A3FB0/5A2C85`.
   - Calça (4, base/sombra): Jeans `4A6A99/344E75`, Preta `3D4048/2A2C32`, Cáqui `C4AE82/9E8A62`, Cinza `7A8191/5B6170`.
   - Acessório (4, cores fixas): Nenhum; Óculos (`26292E`, lente `CFE3F2`); Fone (`33363D`, almofada `F2B632`); Boné (`213F5E`, aba `16304A`, ponto `FDC339`).
-  - Fixas: olhos `26292E`, sapato `3A3F4B`, sola `26292E`, sombra `00000040`. Nenhuma fixa pode ser igual a uma chave.
-- Saídas: `web/public/game/avatar-parts.png` em **1×** (12 colunas = baixo/esquerda/direita/cima × parado/A/B; 12 linhas = body, pants, shirt, 6 cabelos, 3 acessórios; 192×288), `web/src/avatar/catalog.gen.ts`, `web/src/avatar/swatches.gen.css` (classes `.swatch-<cat>-<i> { --swatch: #hex }`). `-sheet` gera `avatars.png` (conferência) e `avatars.gif` (andando nas 4 direções, `image/gif` stdlib). `parseSprite` deixa de exigir múltiplos de 16 (checagem vai para quem chama).
+  - Fixas (`internal/avatar`, `Fixed()`): olhos `26292E`, brilho dos olhos `F5F1EA`, sapato `3A3F4B`, sola `26292E`, sombra `00000040`, brilho do couro cabeludo `FFFFFF73` (só no estilo Careca). Nenhuma fixa pode ser igual a uma chave.
+- Saídas: `web/public/game/avatar-parts.png` em **1×** (12 colunas = baixo/esquerda/direita/cima × parado/A/B; 13 linhas = body, pants, shirt, 7 cabelos, 3 acessórios; 192×312; cresce com o catálogo), `web/src/avatar/catalog.gen.ts`, `web/src/avatar/swatches.gen.css` (classes `.swatch-<cat>-<i> { --swatch: #hex }`). `-sheet` gera `avatars.png` (conferência) e `avatars.gif` (andando nas 4 direções, `image/gif` stdlib). `parseSprite` deixa de exigir múltiplos de 16 (checagem vai para quem chama).
 
 ## Servidor e protocolo (6.3b)
 
