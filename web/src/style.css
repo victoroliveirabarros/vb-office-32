@@ -56,7 +56,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1d1f27; fon
 .chat-notice { margin: 0; padding: 4px 10px; color: #b8bccb; font-size: 12px; overflow-wrap: anywhere; }
 .chat-notice.offline { color: #f2b84b; }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 8px; }
-.chat-msg { margin-top: 6px; }
+.chat-msg { margin-top: 6px; overflow: hidden; }
 .chat-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
 .chat-from { font-weight: 600; color: #a9c4ec; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: isolate; }
 .chat-msg.own .chat-from { color: #9fd9a8; }

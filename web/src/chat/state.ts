@@ -36,6 +36,9 @@ export type Composed = { ok: true; msg: ChatSend } | { ok: false; error: CleanEr
 
 export const TAB_CAP = 200
 
+/** How far a lost send's local time may be from the server's. */
+export const DELIVERED_SLACK_MS = 60_000
+
 export function directKey(peer: string): TabKey {
   return `dm:${peer}`
 }
@@ -114,9 +117,14 @@ export class ChatState {
     for (const cid of [...this.pending.keys()]) this.fail(cid, 'disconnected')
   }
 
-  /** Replaces the everyone tab, keeping unconfirmed own sends at the end. */
+  /**
+   * Replaces the everyone tab. Own sends without an id stay, placed by time,
+   * except one lost with the connection that the history shows delivered: an
+   * own message with the same text, close in time, not echoed before.
+   */
   history(messages: readonly Chat[]): void {
     const tab = this.mustTab('everyone')
+    const echoed = new Set(tab.entries.map((e) => e.id))
     const seen = new Set<string>()
     const entries: Entry[] = []
     for (const msg of messages) {
@@ -124,7 +132,17 @@ export class ChatState {
       seen.add(msg.id)
       entries.push(this.entryFrom(msg))
     }
-    tab.entries = [...entries, ...tab.entries.filter((e) => e.id === null)]
+
+    const delivered = entries.filter((e) => e.own && !echoed.has(e.id))
+    const local = tab.entries.filter((e) => {
+      if (e.id !== null) return false
+      if (e.status !== 'failed' || e.reason !== 'disconnected') return true
+      const i = delivered.findIndex((d) => d.text === e.text && Math.abs(d.at - e.at) <= DELIVERED_SLACK_MS)
+      if (i < 0) return true
+      delivered.splice(i, 1)
+      return false
+    })
+    tab.entries = mergeByTime(entries, local)
     this.trim(tab)
   }
 
@@ -235,4 +253,15 @@ export class ChatState {
     if (!tab) throw new Error(`chat tab ${key} missing`)
     return tab
   }
+}
+
+/** Inserts extra into sorted by at, keeping the order of sorted and of ties. */
+function mergeByTime(sorted: readonly Entry[], extra: readonly Entry[]): Entry[] {
+  const out: Entry[] = []
+  let i = 0
+  for (const entry of [...extra].sort((a, b) => a.at - b.at)) {
+    for (let next = sorted[i]; next !== undefined && next.at <= entry.at; next = sorted[++i]) out.push(next)
+    out.push(entry)
+  }
+  return out.concat(sorted.slice(i))
 }

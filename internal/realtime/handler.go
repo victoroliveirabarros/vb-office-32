@@ -22,6 +22,7 @@ type Handler struct {
 	auth           Authenticator
 	originPatterns []string
 	slots          chan struct{}
+	chats          *chatLimits
 	log            *slog.Logger
 }
 
@@ -33,6 +34,7 @@ func NewHandler(hub *Hub, authn Authenticator, originPatterns []string, maxSessi
 		auth:           authn,
 		originPatterns: originPatterns,
 		slots:          make(chan struct{}, maxSessions),
+		chats:          newChatLimits(),
 		log:            log,
 	}
 }
@@ -70,7 +72,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// library limit would close with 1009.
 	conn.SetReadLimit(-1)
 
-	s := newSession(id, conn, room, h.log.With("session", id.ID))
+	s := newSession(id, conn, room, h.chats, h.log.With("session", id.ID))
 	if err := room.join(r.Context(), s); err != nil {
 		conn.Close(websocket.StatusGoingAway, reasonRestarting)
 		return

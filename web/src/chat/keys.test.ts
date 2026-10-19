@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atBottom, inputAction, isComposing, isEditable, shouldFocusChat } from './keys'
+import { atBottom, inputAction, isComposing, isEditable, keepFromGame, shouldFocusChat } from './keys'
 
 const body = { tagName: 'BODY' }
 const canvas = { tagName: 'CANVAS' }
@@ -60,5 +60,17 @@ describe('atBottom', () => {
     expect(atBottom({ scrollTop: 594, scrollHeight: 1000, clientHeight: 400 })).toBe(true)
     expect(atBottom({ scrollTop: 500, scrollHeight: 1000, clientHeight: 400 })).toBe(false)
     expect(atBottom({ scrollTop: 0, scrollHeight: 100, clientHeight: 400 })).toBe(true)
+  })
+})
+
+describe('keepFromGame', () => {
+  it('keeps scrolling keys inside the chat', () => {
+    for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']) {
+      expect(keepFromGame({ key })).toBe(true)
+    }
+  })
+
+  it('lets other keys through', () => {
+    for (const key of ['w', 'a', 's', 'd', 'Enter', 'Escape', 'Tab', ' ']) expect(keepFromGame({ key })).toBe(false)
   })
 })

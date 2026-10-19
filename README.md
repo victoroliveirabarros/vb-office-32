@@ -87,11 +87,13 @@ starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is `ws://localhost` or
 Players chat with everyone in the space, with whoever is `nearby` at the
 moment of sending, or directly with one player who is online (otherwise the
 sender gets `offline`; nothing is queued). The server cleans the text
-(invalid UTF-8, control and bidi/format characters, trailing spaces, runs of
-blank lines; emoji sequences and the Persian ZWNJ survive), refuses it when
-empty or over 500 characters or 20 lines instead of truncating, and allows
-each connection 5 chats in a row and then one every 2 seconds
-(`rate_limited`, without closing the connection). The sender's name comes
+(invalid UTF-8, control and bidi/format characters, blank letters such as
+the Hangul filler, trailing spaces, runs of blank lines; emoji sequences and
+the Persian ZWNJ survive), refuses it when empty or over 500 characters or
+20 lines instead of truncating, and allows each identity, across all its
+connections, 5 chats in a row and then one every 2 seconds, and each space
+40 `everyone` chats in a row and then 20 per second from all senders
+together (`rate_limited`, without closing the connection). The sender's name comes
 from its session. The last 100 `everyone` messages are kept in memory and
 sent to whoever joins; `nearby` and direct messages are never kept, and
 nothing survives a restart. Message text, recipients and client ids never

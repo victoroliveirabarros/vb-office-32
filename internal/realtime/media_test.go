@@ -183,7 +183,7 @@ func TestMediaRenewal(t *testing.T) {
 			}
 		}()
 
-		s := newSession(auth.Identity{ID: "guest:ana", Name: "Ana"}, nil, room, log)
+		s := newSession(auth.Identity{ID: "guest:ana", Name: "Ana"}, nil, room, nil, log)
 		if err := room.join(ctx, s); err != nil {
 			t.Fatal(err)
 		}
@@ -310,7 +310,7 @@ func runRoom(t *testing.T, mi *fakeIssuer) (*Room, context.CancelFunc) {
 
 func joinAs(t *testing.T, room *Room, name string) *Session {
 	t.Helper()
-	s := newSession(auth.Identity{ID: "guest:" + strings.ToLower(name), Name: name}, nil, room, slog.New(slog.DiscardHandler))
+	s := newSession(auth.Identity{ID: "guest:" + strings.ToLower(name), Name: name}, nil, room, nil, slog.New(slog.DiscardHandler))
 	if err := room.join(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
