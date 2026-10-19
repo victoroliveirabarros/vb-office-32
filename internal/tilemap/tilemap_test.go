@@ -24,6 +24,12 @@ func fixture(mod func(m map[string]any)) string {
 		"layers": []any{
 			map[string]any{"name": "floor", "type": "tilelayer", "width": 4, "height": 3, "data": make([]int, 12)},
 			map[string]any{"name": "walls", "type": "tilelayer", "width": 4, "height": 3, "data": walls},
+			// decor never blocks, even over free tiles.
+			map[string]any{"name": "decor", "type": "tilelayer", "width": 4, "height": 3, "data": []int{
+				0, 0, 0, 0,
+				0, 5, 5, 5,
+				0, 0, 0, 0,
+			}},
 			map[string]any{"name": "spawns", "type": "objectgroup", "objects": []any{
 				map[string]any{"point": true, "x": 48.0, "y": 63.9},
 				map[string]any{"point": false, "x": 0.0, "y": 0.0},
@@ -84,15 +90,15 @@ func TestLoadInvalid(t *testing.T) {
 		{"missing floor", func(m map[string]any) { m["layers"] = layers(m)[1:] }},
 		{"missing walls", func(m map[string]any) {
 			l := layers(m)
-			m["layers"] = []any{l[0], l[2]}
+			m["layers"] = []any{l[0], l[2], l[3]}
 		}},
-		{"missing spawns", func(m map[string]any) { m["layers"] = layers(m)[:2] }},
+		{"missing spawns", func(m map[string]any) { m["layers"] = layers(m)[:3] }},
 		{"walls wrong type", func(m map[string]any) { layers(m)[1].(map[string]any)["type"] = "objectgroup" }},
 		{"walls wrong size", func(m map[string]any) { layers(m)[1].(map[string]any)["data"] = []int{0} }},
 		{"base64", func(m map[string]any) { layers(m)[1].(map[string]any)["encoding"] = "base64" }},
-		{"no spawn", func(m map[string]any) { layers(m)[2].(map[string]any)["objects"] = []any{} }},
+		{"no spawn", func(m map[string]any) { layers(m)[3].(map[string]any)["objects"] = []any{} }},
 		{"blocked spawn", func(m map[string]any) {
-			layers(m)[2].(map[string]any)["objects"] = []any{map[string]any{"point": true, "x": 1.0, "y": 1.0}}
+			layers(m)[3].(map[string]any)["objects"] = []any{map[string]any{"point": true, "x": 1.0, "y": 1.0}}
 		}},
 	}
 	for _, tt := range tests {
