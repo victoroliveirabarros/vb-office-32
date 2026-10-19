@@ -21,6 +21,7 @@ import { createChat } from './ui/chat'
 import { askName } from './ui/join'
 import { showLogin, showLogout } from './ui/login'
 import { createMediaView } from './ui/media'
+import { createZoomControls } from './ui/zoom'
 
 const STATUS_TEXT: Record<ConnectionStatus, string | null> = {
   connecting: 'Conectando…',
@@ -79,6 +80,7 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>): Pro
     speakers: media,
     zonesLoaded: (zones) => chat.setZones(zones),
     picked: (id) => chat.openDirect(id),
+    zoom: createZoomControls(),
   })
 
   await font
@@ -88,6 +90,8 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>): Pro
     transparent: true,
     pixelArt: true,
     roundPixels: true,
+    // Only Ctrl/⌘ + wheel is the game's (zoom); see ui/zoom.ts.
+    input: { mouse: { preventDefaultWheel: false } },
     scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
     scene: [new BootScene(hud), office],
   })

@@ -21,6 +21,19 @@
       <div id="zone" class="pill brand zone-strip" hidden></div>
     </div>
     <div id="zone-status" class="sr-only" role="status"></div>
+    <div id="zoom" class="brand zoom" role="group" aria-label="Zoom do mapa" hidden>
+      <button id="zoom-in" class="zoom-button" type="button" aria-label="Aproximar" title="Aproximar (+)" aria-keyshortcuts="+">
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-in" /></svg>
+      </button>
+      <span id="zoom-level" class="zoom-level" aria-hidden="true"></span>
+      <button id="zoom-out" class="zoom-button" type="button" aria-label="Afastar" title="Afastar (−)" aria-keyshortcuts="-">
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-out" /></svg>
+      </button>
+      <button id="zoom-reset" class="zoom-button zoom-reset" type="button" aria-label="Zoom padrão" title="Zoom padrão (0)" aria-keyshortcuts="0">
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#scan" /></svg>
+      </button>
+      <span id="zoom-status" class="sr-only" role="status"></span>
+    </div>
     <div id="media-tiles" hidden></div>
     <div id="media-stage" hidden><span id="media-stage-label"></span></div>
     <div id="media-bar" class="brand" hidden>

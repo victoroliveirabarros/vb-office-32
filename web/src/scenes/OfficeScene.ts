@@ -12,14 +12,20 @@ import { Avatar } from '../entities/Avatar'
 import { Grid } from '../game/grid'
 import { Predictor, correctionFor } from '../game/prediction'
 import { ZoneMap } from '../game/zones'
+import { cameraBounds, textResolution, Zoom, zoomPrefs } from '../game/zoom'
+import type { Size } from '../game/zoom'
 import type { MapZone } from '../game/zones'
 import type { Connection } from '../net/connection'
 import type { Dir, Player, Pos, ServerMessage, State, Welcome } from '../net/protocol'
 import type { Hud } from '../ui/hud'
+import type { ZoomView } from '../ui/zoom'
 import { AVATAR_PARTS_KEY, MAP_KEY, TILE_SIZE, TILES_KEY, TILESET_NAME } from './assets'
 
 const PING_INTERVAL_MS = 2000
 const DEFAULT_STEP_MS = 150
+const ZOOM_MS = 180
+// A finger lifted right after a pinch is not a click on an avatar.
+const PICK_AFTER_PINCH_MS = 300
 
 type DirKeys = Record<Dir, Phaser.Input.Keyboard.Key[]>
 
@@ -33,6 +39,7 @@ export type SceneHooks = {
   zonesLoaded?(zones: ZoneMap): void
   /** Someone else's avatar was clicked. */
   picked?(id: string): void
+  zoom?: ZoomView
 }
 
 const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x014c8b, private: 0x7a3fb0 }
@@ -40,7 +47,12 @@ const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x014c8b, privat
 const ACCENT = 0xfdc339
 const SIGN_HEIGHT = 16
 
-type ZoneView = { zone: MapZone; outline: Phaser.GameObjects.Graphics; sign: Phaser.GameObjects.Container }
+type ZoneView = {
+  zone: MapZone
+  outline: Phaser.GameObjects.Graphics
+  sign: Phaser.GameObjects.Container
+  label: Phaser.GameObjects.Text
+}
 
 export class OfficeScene extends Phaser.Scene implements TypingGate {
   private grid!: Grid
@@ -57,6 +69,10 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private speaking: ReadonlySet<string> = new Set()
   private readonly typing = new TypingOwners()
   private readonly looks = new LookCache(this.lookStore())
+  private readonly zoomPrefs = zoomPrefs()
+  private zoom!: Zoom
+  private mapSize: Size = { width: 0, height: 0 }
+  private pinchEndedAt = -Infinity
 
   constructor(
     private readonly connection: Connection,
@@ -80,9 +96,21 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     this.drawZones(zones)
     this.hooks.zonesLoaded?.(zones)
 
-    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
-    this.fitCamera()
-    this.scale.on(Phaser.Scale.Events.RESIZE, this.fitCamera, this)
+    this.mapSize = { width: map.widthInPixels, height: map.heightInPixels }
+    this.zoom = new Zoom(this.mapSize, this.viewSize(), this.zoomPrefs.load())
+    this.applyZoom(false)
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.resized, this)
+    const offZoom = this.hooks.zoom?.bind({
+      step: (delta) => this.zoomBy(() => this.zoom.step(delta)),
+      reset: () => this.zoomBy(() => this.zoom.reset()),
+      pinchStart: () => this.zoom.startPinch(),
+      pinch: (ratio) => this.zoomBy(() => this.zoom.pinch(ratio)),
+      pinchEnd: () => {
+        this.zoom.endPinch()
+        this.pinchEndedAt = this.time.now
+      },
+      keyboardFree: () => !this.typing.typing,
+    })
 
     this.keys = this.createKeys()
     this.applyTyping()
@@ -98,7 +126,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       offMessage()
       offStatus()
       offSpeaking?.()
-      this.scale.off(Phaser.Scale.Events.RESIZE, this.fitCamera, this)
+      offZoom?.()
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.resized, this)
     })
 
     this.time.addEvent({
@@ -208,7 +237,11 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const avatar = new Avatar(this, player, this.looks)
     avatar.setSpeaking(this.speaking.has(player.id))
     const { id } = player
-    if (id !== this.selfId) avatar.onPick(() => this.hooks.picked?.(id))
+    if (id !== this.selfId) {
+      avatar.onPick(() => {
+        if (!this.pickedByPinch()) this.hooks.picked?.(id)
+      })
+    }
     this.avatars.set(id, avatar)
   }
 
@@ -226,20 +259,21 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       const [x, y, w, h] = [x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE]
       const color = ZONE_COLORS[zone.kind]
       const outline = this.add.graphics().setDepth(4).lineStyle(2, ACCENT, 0.85).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
-      const sign = this.zoneSign(zone.name, color).setPosition(x + 6, Math.max(SIGN_HEIGHT / 2, y - TILE_SIZE / 2))
-      return { zone, outline, sign }
+      const [sign, label] = this.zoneSign(zone.name, color)
+      sign.setPosition(x + 6, Math.max(SIGN_HEIGHT / 2, y - TILE_SIZE / 2))
+      return { zone, outline, sign, label }
     })
     this.highlightZone()
   }
 
-  private zoneSign(name: string, color: number): Phaser.GameObjects.Container {
+  private zoneSign(name: string, color: number): [Phaser.GameObjects.Container, Phaser.GameObjects.Text] {
     const text = this.add
       .text(16, 0, name, {
         fontFamily: '"Montserrat", system-ui, sans-serif',
         fontSize: '10px',
         fontStyle: '700',
         color: '#ffffff',
-        resolution: 4,
+        resolution: this.textResolution(),
       })
       .setOrigin(0, 0.5)
     text.texture.setFilter(Phaser.Textures.FilterMode.LINEAR)
@@ -250,7 +284,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       .fillRoundedRect(0, -SIGN_HEIGHT / 2, width, SIGN_HEIGHT, 4)
       .fillStyle(ACCENT, 1)
       .fillCircle(9, 0, 3)
-    return this.add.container(0, 0, [plate, text]).setDepth(4)
+    return [this.add.container(0, 0, [plate, text]).setDepth(4), text]
   }
 
   private highlightZone(): void {
@@ -309,9 +343,68 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     return dirs.find((dir) => this.keys[dir].some((key) => key.isDown)) ?? null
   }
 
-  private fitCamera(): void {
-    const { width, height } = this.scale
-    const zoom = Math.max(1, Math.min(3, Math.floor(Math.min(width / (15 * TILE_SIZE), height / (10 * TILE_SIZE)))))
-    this.cameras.main.setZoom(zoom)
+  private viewSize(): Size {
+    return { width: this.scale.width, height: this.scale.height }
+  }
+
+  private textResolution(): number {
+    return textResolution(this.cameras.main.zoom, window.devicePixelRatio)
+  }
+
+  private pickedByPinch(): boolean {
+    return this.zoom.pinching || this.time.now - this.pinchEndedAt < PICK_AFTER_PINCH_MS
+  }
+
+  // A user's pick is remembered; only the view's default follows resizes.
+  private zoomBy(change: () => boolean): void {
+    if (!change()) return
+    this.zoomPrefs.save(this.zoom.chosen)
+    this.applyZoom(true)
+  }
+
+  private resized(): void {
+    if (this.zoom.resize(this.viewSize())) return this.applyZoom(false)
+    this.showZoom()
+    this.fitBounds()
+  }
+
+  private showZoom(): void {
+    const { min, max } = this.zoom.range
+    this.hooks.zoom?.show({ level: this.zoom.level, min, max, manual: this.zoom.chosen !== null })
+  }
+
+  // The zoom glides between levels and always lands on a whole one, where
+  // the pixel art stays crisp; the texts are redrawn for it once there.
+  private applyZoom(animate: boolean): void {
+    this.showZoom()
+    const level = this.zoom.level
+    const camera = this.cameras.main
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (!animate || reduced) {
+      camera.zoomEffect.reset()
+      camera.setZoom(level)
+      this.zoomed()
+      return
+    }
+    camera.zoomTo(level, ZOOM_MS, 'Quad.easeOut', true, (_: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+      if (progress < 1) this.fitBounds()
+      else this.zoomed()
+    })
+  }
+
+  private zoomed(): void {
+    this.fitBounds()
+    const resolution = this.textResolution()
+    this.avatars.forEach((avatar) => avatar.refreshLabel())
+    for (const { label } of this.zoneViews) {
+      label.setResolution(resolution)
+      label.texture.setFilter(Phaser.Textures.FilterMode.LINEAR)
+    }
+  }
+
+  private fitBounds(): void {
+    const camera = this.cameras.main
+    const { x, y, width, height } = cameraBounds(this.viewSize(), this.mapSize, camera.zoom)
+    camera.setBounds(x, y, width, height)
   }
 }

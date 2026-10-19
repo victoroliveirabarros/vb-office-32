@@ -3,6 +3,7 @@ import { DEFAULT_APPEARANCE, sameAppearance } from '../avatar/appearance'
 import type { Appearance } from '../avatar/appearance'
 import { frameFor, frameIndex } from '../avatar/frames'
 import type { LookCache } from '../avatar/looks'
+import { textResolution } from '../game/zoom'
 import type { Facing } from '../game/grid'
 import type { Dir, Player } from '../net/protocol'
 import { TILE_SIZE } from '../scenes/assets'
@@ -73,6 +74,12 @@ export class Avatar extends Phaser.GameObjects.Container {
   setLabel(name: string): void {
     this.label.setResolution(labelResolution(this.scene))
     this.label.setText(name)
+    this.drawLabel()
+  }
+
+  /** Redraws the name for the camera's current zoom. */
+  refreshLabel(): void {
+    this.label.setResolution(labelResolution(this.scene))
     this.drawLabel()
   }
 
@@ -171,5 +178,5 @@ function toPixel(tile: number): number {
 }
 
 function labelResolution(scene: Phaser.Scene): number {
-  return Math.min(4, scene.cameras.main.zoom * window.devicePixelRatio)
+  return textResolution(scene.cameras.main.zoom, window.devicePixelRatio)
 }
