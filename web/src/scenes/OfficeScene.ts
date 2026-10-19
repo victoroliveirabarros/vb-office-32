@@ -29,7 +29,8 @@ export type SceneHooks = {
 }
 
 const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x014c8b, private: 0x7a3fb0 }
-const SIGN_DOT = 0xfdc339
+// Yellow reads on every room's floor: blue and slate carpets, rubber.
+const ACCENT = 0xfdc339
 const SIGN_HEIGHT = 16
 
 type ZoneView = { zone: MapZone; outline: Phaser.GameObjects.Graphics; sign: Phaser.GameObjects.Container }
@@ -206,14 +207,14 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     this.avatars.forEach((avatar, id) => avatar.setLabel(this.labels.label(id, this.names.get(id) ?? '')))
   }
 
-  // The carpet already marks each room: our room gets a thin outline, and
-  // every room a sign with its name on the wall above it.
+  // The floor already marks each room: our room gets a thin yellow outline,
+  // and every room a sign in its kind's color on the wall above it.
   private drawZones(zones: ZoneMap): void {
     this.zoneViews = zones.zones.map((zone) => {
       const { x0, y0, x1, y1 } = zone.tiles
       const [x, y, w, h] = [x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE]
       const color = ZONE_COLORS[zone.kind]
-      const outline = this.add.graphics().setDepth(4).lineStyle(2, color, 0.7).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
+      const outline = this.add.graphics().setDepth(4).lineStyle(2, ACCENT, 0.85).strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, 8)
       const sign = this.zoneSign(zone.name, color).setPosition(x + 6, Math.max(SIGN_HEIGHT / 2, y - TILE_SIZE / 2))
       return { zone, outline, sign }
     })
@@ -236,7 +237,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       .graphics()
       .fillStyle(color, 0.92)
       .fillRoundedRect(0, -SIGN_HEIGHT / 2, width, SIGN_HEIGHT, 4)
-      .fillStyle(SIGN_DOT, 1)
+      .fillStyle(ACCENT, 1)
       .fillCircle(9, 0, 3)
     return this.add.container(0, 0, [plate, text]).setDepth(4)
   }
