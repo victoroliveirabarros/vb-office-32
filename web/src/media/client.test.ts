@@ -41,15 +41,24 @@ class FakeRoom implements MediaRoom {
     this.allowed.push([...ids])
     this.log.push(`allow [${ids.join(',')}]`)
   }
-  async setScreenShareEnabled(on: boolean): Promise<boolean> {
+  // Whether the screen is on air, as the SDK would tell.
+  shared = false
+  async setScreenShareEnabled(on: boolean): Promise<void> {
     this.screen.push(on)
+    this.log.push(`screen ${on}`)
     const gate = this.screenGate
     this.screenGate = null
     await gate
-    if (!on) return false
+    if (!on) {
+      this.shared = false
+      return
+    }
     const result = this.screenResult
     if (result instanceof Error) throw result
-    return result
+    this.shared = result
+  }
+  screenShared(): boolean {
+    return this.shared
   }
   async disconnect(): Promise<void> {
     this.disconnects++
@@ -765,6 +774,175 @@ describe('MediaClient', () => {
     await vi.advanceTimersByTimeAsync(500)
     expect(client.state).toBe('connected')
     expect(r.screen).toEqual([true])
+  })
+
+  // A full reconnect unpublishes and republishes the screen; the room is the
+  // truth once reconnected.
+  it('stops a share a full reconnect published again after reporting it ended', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    r.listener.reconnecting()
+    r.listener.screenEnded()
+    expect(view.screen).toMatchObject({ on: false })
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, false])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('keeps a share across a full reconnect and stops it on leaving the room', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    r.listener.reconnecting()
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true])
+    expect(view.screen).toMatchObject({ on: true, busy: false })
+
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []', 'allow [bob]'])
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('leaves the room during a reconnect without letting the open area in before the share stops', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    r.listener.reconnecting()
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []'])
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []', 'allow [bob]'])
+    expect(r.shared).toBe(false)
+  })
+
+  it('lets the open area in only once a share stopped on leaving the room', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('ana', 'bob'))
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false'])
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow [ana,bob]'])
+  })
+
+  it('unpublishes a share whose picker resolved after leaving the room before letting anyone new in', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    const picked = deferred()
+    r.screenGate = picked.promise
+    client.toggleScreen()
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    expect(view.screen).toMatchObject({ on: false, busy: true, meeting: false })
+
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    picked.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.shared).toBe(true)
+    expect(r.log).toEqual(['allow []', 'screen false'])
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['allow []', 'screen false', 'allow [bob]'])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('lets the open area in once a picker left open at the door is cancelled', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    const picked = deferred()
+    r.screenGate = picked.promise
+    r.screenResult = false
+    client.toggleScreen()
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    picked.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['allow []', 'allow [bob]'])
+    expect(r.screen).toEqual([true])
+  })
+
+  it('gives way to a share started at the same time by a smaller identity', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('zoe', 2)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana', 'zoe'))
+    const published = deferred()
+    r.screenGate = published.promise
+    client.toggleScreen()
+    r.publish('zoe', 'screen')
+    expect(view.screen).toMatchObject({ on: true, busy: true })
+    r.publish('ana', 'screen')
+    expect(view.screen).toMatchObject({ on: false, busy: true, error: 'taken' })
+    published.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, false])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false, error: 'taken' })
   })
 
   it('watches one screen of the room, keeping the current one', async () => {

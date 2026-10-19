@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Zone } from '../net/protocol'
-import { canShare, screenTarget, sharers, shouldStop } from './screen'
+import { canShare, permissionsOnlyShrink, screenTarget, sharers, shouldStop, yieldsScreen } from './screen'
 import type { Publication, TrackSource } from './subscriptions'
 
 const meeting: Zone = { id: 'sala-1', name: 'Sala 1', kind: 'meeting' }
@@ -53,5 +53,23 @@ describe('screenTarget', () => {
     expect(screenTarget(pubs, nearby, meeting, 'c')).toBe('c')
     expect(screenTarget(pubs, nearby, meeting, 'z')).toBe('b')
     expect(screenTarget(pubs, new Set(['a']), meeting, 'b')).toBeNull()
+  })
+})
+
+describe('permissionsOnlyShrink', () => {
+  it('holds permissions back outside meeting rooms while a screen may be on air', () => {
+    expect(permissionsOnlyShrink(null, true, false)).toBe(true)
+    expect(permissionsOnlyShrink(booth, false, true)).toBe(true)
+    expect(permissionsOnlyShrink(null, false, false)).toBe(false)
+    expect(permissionsOnlyShrink(meeting, true, true)).toBe(false)
+  })
+})
+
+describe('yieldsScreen', () => {
+  it('gives way to a smaller identity sharing in the room', () => {
+    const pubs = [pub('b'), pub('d'), pub('a', 'camera')]
+    expect(yieldsScreen(pubs, new Set(['a', 'b', 'd']), 'c')).toBe(true)
+    expect(yieldsScreen(pubs, new Set(['a', 'd']), 'c')).toBe(false)
+    expect(yieldsScreen(pubs, new Set(['b', 'd']), 'a')).toBe(false)
   })
 })

@@ -12,6 +12,16 @@ describe('AllowedSubscribers', () => {
     expect(allowed.update([])).toEqual([])
   })
 
+  it('restricts to ids already sent, and to none after a reset', () => {
+    const allowed = new AllowedSubscribers()
+    allowed.update(['a', 'b'])
+    expect(allowed.restrict(['b', 'c'])).toEqual(['b'])
+    expect(allowed.restrict(['a', 'b', 'c'])).toBeNull()
+    expect(allowed.update(['b', 'c'])).toEqual(['b', 'c'])
+    allowed.reset()
+    expect(allowed.restrict(['b'])).toEqual([])
+  })
+
   it('sends again after a reset', () => {
     const allowed = new AllowedSubscribers()
     allowed.update(['a'])

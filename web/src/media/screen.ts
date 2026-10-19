@@ -25,6 +25,19 @@ export function shouldStop(zone: Zone | null): boolean {
   return !inMeeting(zone)
 }
 
+// permissionsOnlyShrink tells whether subscriber permissions may only lose
+// identities: outside a meeting room while our screen may still be on air,
+// live or with its picker or publish pending. Widening waits for it to stop.
+export function permissionsOnlyShrink(zone: Zone | null, live: boolean, busy: boolean): boolean {
+  return (live || busy) && !inMeeting(zone)
+}
+
+// yieldsScreen tells whether our share must give way: two shares started at
+// once in the same room, and the smallest identity keeps it.
+export function yieldsScreen(pubs: readonly Publication[], nearby: ReadonlySet<string>, self: string): boolean {
+  return [...sharers(pubs, nearby)].some((id) => id < self)
+}
+
 // screenTarget is the one screen to watch: none outside a meeting room, the
 // current one while it is still shared, otherwise the smallest identity.
 export function screenTarget(

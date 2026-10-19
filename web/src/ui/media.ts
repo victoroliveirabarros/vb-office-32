@@ -1,4 +1,4 @@
-import type { DeviceError, DeviceState, LinkState, MediaControls, MediaView, ScreenState } from '../media/client'
+import type { DeviceError, DeviceState, LinkState, MediaControls, MediaView, ScreenError, ScreenState } from '../media/client'
 import { requireElement } from './dom'
 
 const LINK_TEXT: Record<LinkState, string> = {
@@ -25,11 +25,12 @@ const CAMERA_ERROR: Record<DeviceError, string> = {
   other: 'Falha ao abrir a câmera',
 }
 
-const SCREEN_ERROR: Record<DeviceError, string> = {
+const SCREEN_ERROR: Record<ScreenError, string> = {
   denied: 'Compartilhamento de tela bloqueado',
   'not-found': 'Nenhuma tela disponível',
   'in-use': 'Tela em uso por outro app',
   other: 'Falha ao compartilhar a tela',
+  taken: 'Outra pessoa da sala começou a compartilhar antes',
 }
 
 const SELF = ''

@@ -56,6 +56,9 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
   // sends this on connect, before anything is published.
   room.localParticipant.setTrackSubscriptionPermissions(false, [])
   let preview: { track: LocalTrack; el: HTMLMediaElement } | null = null
+  // The screen capture outlives its publication while a full reconnect
+  // publishes it again.
+  let screen: LocalTrack | undefined
   // The SDK detaches a track before announcing it unsubscribed, so the
   // elements to remove are tracked here.
   const attached = new WeakMap<RemoteTrack, HTMLMediaElement[]>()
@@ -93,8 +96,10 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
       const source = trackSource(track.source)
       if (source) listener.unsubscribed(participant.identity, source)
     })
+    // A full reconnect unpublishes every track and publishes it again without
+    // stopping it, so only a stopped capture ends the share.
     .on(RoomEvent.LocalTrackUnpublished, (pub) => {
-      if (pub.source === Track.Source.ScreenShare) listener.screenEnded()
+      if (pub.source === Track.Source.ScreenShare && !capturing(pub.track)) listener.screenEnded()
     })
     .on(RoomEvent.TrackSubscriptionPermissionChanged, (pub, status, participant) => {
       if (status === TrackPublication.PermissionStatus.NotAllowed) watchNotAllowed(pub, participant.identity)
@@ -163,15 +168,20 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
     async setScreenShareEnabled(on) {
       try {
         const pub = await room.localParticipant.setScreenShareEnabled(on, screenCapture, screenPublish)
-        return on && pub !== undefined
+        if (on && pub?.track) screen = pub.track
       } catch (err) {
         // Cancelling the picker, or a system that denies capture, is no error.
-        if (err instanceof DOMException && err.name === 'NotAllowedError') return false
+        if (err instanceof DOMException && err.name === 'NotAllowedError') return
         throw new DeviceFailure(deviceError(err))
       }
     },
+    screenShared: () => capturing(room.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track) || capturing(screen),
     startAudio: () => room.startAudio(),
   }
+}
+
+function capturing(track: Track | undefined): boolean {
+  return track?.mediaStreamTrack.readyState === 'live'
 }
 
 function watchNotAllowed(pub: RemoteTrackPublication, identity: string): void {

@@ -7,11 +7,16 @@ import { createLiveKitRoom } from './livekit'
 
 type Handler = (...args: never[]) => unknown
 
+type FakeTrack = { mediaStreamTrack: { readyState: 'live' | 'ended' } }
+
 type Local = {
   permissions: unknown[][]
   screenCalls: unknown[][]
   screenError: Error | null
+  published: FakeTrack | undefined
 }
+
+const track = (readyState: 'live' | 'ended'): FakeTrack => ({ mediaStreamTrack: { readyState } })
 
 const sdk = vi.hoisted(() => ({
   rooms: [] as { options: Partial<RoomOptions>; handlers: Map<string, Handler>; localParticipant: Local }[],
@@ -23,13 +28,24 @@ vi.mock('livekit-client', async (importOriginal) => {
     permissions: unknown[][] = []
     screenCalls: unknown[][] = []
     screenError: Error | null = null
+    // The screen publication's track, while published.
+    published: FakeTrack | undefined
     setTrackSubscriptionPermissions(...args: unknown[]): void {
       this.permissions.push(args)
     }
     async setScreenShareEnabled(...args: unknown[]): Promise<object | undefined> {
       this.screenCalls.push(args)
       if (this.screenError) throw this.screenError
-      return args[0] ? {} : undefined
+      if (!args[0]) {
+        if (this.published) this.published.mediaStreamTrack.readyState = 'ended'
+        this.published = undefined
+        return undefined
+      }
+      this.published = { mediaStreamTrack: { readyState: 'live' } }
+      return { track: this.published }
+    }
+    getTrackPublication(): object | undefined {
+      return this.published && { track: this.published }
     }
   }
   class Room {
@@ -103,7 +119,8 @@ describe('createLiveKitRoom', () => {
   it('shares the screen at 720p and 5 fps without audio', async () => {
     const media = createLiveKitRoom(listener())
     const local = lastRoom().localParticipant
-    expect(await media.setScreenShareEnabled(true)).toBe(true)
+    await media.setScreenShareEnabled(true)
+    expect(media.screenShared()).toBe(true)
     const [on, capture, publish] = local.screenCalls[0] ?? []
     expect(on).toBe(true)
     expect(capture).toMatchObject({
@@ -114,25 +131,41 @@ describe('createLiveKitRoom', () => {
       selfBrowserSurface: 'exclude',
     })
     expect(publish).toEqual({ screenShareEncoding: ScreenSharePresets.h720fps5.encoding })
-    expect(await media.setScreenShareEnabled(false)).toBe(false)
+    await media.setScreenShareEnabled(false)
+    expect(media.screenShared()).toBe(false)
+  })
+
+  it('counts a capture waiting to be published again as shared', async () => {
+    const media = createLiveKitRoom(listener())
+    const local = lastRoom().localParticipant
+    await media.setScreenShareEnabled(true)
+    const capture = local.published
+    local.published = undefined
+    expect(media.screenShared()).toBe(true)
+    if (capture) capture.mediaStreamTrack.readyState = 'ended'
+    expect(media.screenShared()).toBe(false)
   })
 
   it('treats a cancelled picker as not sharing and other failures as errors', async () => {
     const media = createLiveKitRoom(listener())
     const local = lastRoom().localParticipant
     local.screenError = new DOMException('Permission denied', 'NotAllowedError')
-    expect(await media.setScreenShareEnabled(true)).toBe(false)
+    await media.setScreenShareEnabled(true)
+    expect(media.screenShared()).toBe(false)
     local.screenError = new Error('boom')
     await expect(media.setScreenShareEnabled(true)).rejects.toBeInstanceOf(DeviceFailure)
   })
 
-  it('reports a local screen share that ended', () => {
+  it('reports a local screen share that ended, not one a reconnect publishes again', () => {
     const screenEnded = vi.fn()
     createLiveKitRoom(listener({ screenEnded }))
-    const handler = lastRoom().handlers.get(RoomEvent.LocalTrackUnpublished) as ((pub: { source: Track.Source }) => void) | undefined
-    handler?.({ source: Track.Source.Camera })
+    const handler = lastRoom().handlers.get(RoomEvent.LocalTrackUnpublished) as
+      | ((pub: { source: Track.Source; track?: FakeTrack }) => void)
+      | undefined
+    handler?.({ source: Track.Source.Camera, track: track('ended') })
+    handler?.({ source: Track.Source.ScreenShare, track: track('live') })
     expect(screenEnded).not.toHaveBeenCalled()
-    handler?.({ source: Track.Source.ScreenShare })
+    handler?.({ source: Track.Source.ScreenShare, track: track('ended') })
     expect(screenEnded).toHaveBeenCalledOnce()
   })
 })

@@ -8,7 +8,7 @@ import type { MediaPrefs } from './prefs'
 import { distance, nearest, VIDEO_LIMIT, volumeAt } from './proximity'
 import { disconnectAction } from './reconnect'
 import type { DisconnectKind } from './reconnect'
-import { canShare, inMeeting, screenTarget, sharers, shouldStop } from './screen'
+import { canShare, inMeeting, permissionsOnlyShrink, screenTarget, sharers, shouldStop, yieldsScreen } from './screen'
 import { subscriptionChanges, videoCandidates } from './subscriptions'
 import type { Publication, TrackSource } from './subscriptions'
 
@@ -54,9 +54,11 @@ export interface MediaRoom {
   setMicrophoneEnabled(on: boolean): Promise<void>
   // Returns the local preview while the camera is on.
   setCameraEnabled(on: boolean): Promise<HTMLMediaElement | null>
-  // Resolves whether the screen is shared now: false when the picker was
-  // cancelled.
-  setScreenShareEnabled(on: boolean): Promise<boolean>
+  // A cancelled picker resolves without sharing.
+  setScreenShareEnabled(on: boolean): Promise<void>
+  // Whether our screen capture is on air, or about to be again after a
+  // reconnect.
+  screenShared(): boolean
   startAudio(): Promise<void>
 }
 
@@ -66,8 +68,13 @@ export type LinkState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | '
 
 export type DeviceState = { on: boolean; busy: boolean; error: DeviceError | null }
 
+// taken: someone else in the room started sharing at the same time.
+export type ScreenError = DeviceError | 'taken'
+
+type ShareState = { on: boolean; busy: boolean; error: ScreenError | null }
+
 // meeting: we are in a meeting room; taken: someone else there shares.
-export type ScreenState = DeviceState & { meeting: boolean; taken: boolean }
+export type ScreenState = ShareState & { meeting: boolean; taken: boolean }
 
 export interface MediaView {
   setLink(state: LinkState): void
@@ -123,12 +130,12 @@ export class MediaClient implements MediaControls {
   private readonly speakingListeners = new Set<SpeakingListener>()
   private mic: DeviceState
   private camera: DeviceState = { on: false, busy: false, error: null }
-  private screen: DeviceState = { on: false, busy: false, error: null }
+  private screen: ShareState = { on: false, busy: false, error: null }
   private screenTaken = false
   // What the room carries; null when a failed call left it unknown.
   private micLive: boolean | null = false
   private cameraLive: boolean | null = false
-  private screenLive: boolean | null = false
+  private screenLive = false
   // Bumped whenever the room is dropped, so late results are ignored.
   private session = 0
   private readonly createRoom: RoomFactory
@@ -250,13 +257,16 @@ export class MediaClient implements MediaControls {
     if (relevant) this.sync(false)
   }
 
+  // Leaving a meeting room stops the share, also one whose picker or
+  // publish is pending: applyScreen undoes it once that resolves.
   private onZone(zone: Zone): void {
     this.zone = zone.id === '' ? null : zone
-    if (this.screen.on && !this.screen.busy && shouldStop(this.zone)) {
-      this.screen = { on: false, busy: false, error: null }
+    if (this.screen.on && shouldStop(this.zone)) {
+      this.screen = { ...this.screen, on: false, error: null }
       void this.applyScreen()
     }
     this.renderScreen()
+    this.applyPermissions()
     this.sync(false)
   }
 
@@ -334,6 +344,7 @@ export class MediaClient implements MediaControls {
     reconnected: () => {
       if (this.link !== 'reconnecting') return
       this.setLink('connected')
+      this.resyncScreen()
       this.sync(true)
       void this.applyDevices()
     },
@@ -363,6 +374,7 @@ export class MediaClient implements MediaControls {
       if (this.screen.busy) return
       this.screenLive = false
       if (this.screen.on) this.setScreen({ on: false, busy: false, error: null })
+      this.applyPermissions()
     },
   }
 
@@ -375,11 +387,14 @@ export class MediaClient implements MediaControls {
     this.sendPermissions(this.permitted, false)
   }
 
+  // While our screen may be on air outside a meeting room, nobody new may
+  // receive us: the open area waits for the share to stop.
   private sendPermissions(ids: Iterable<string>, force: boolean): void {
     const room = this.room
     if (!room || this.link === 'stopped') return
     if (force) this.allowed.reset()
-    const list = this.allowed.update(ids)
+    const shrink = permissionsOnlyShrink(this.zone, this.screenLive, this.screen.busy)
+    const list = shrink ? this.allowed.restrict(ids) : this.allowed.update(ids)
     if (list) room.setAllowedSubscribers(list)
   }
 
@@ -401,6 +416,10 @@ export class MediaClient implements MediaControls {
     if (taken !== this.screenTaken) {
       this.screenTaken = taken
       this.renderScreen()
+    }
+    if (this.screen.on && this.selfId !== null && inMeeting(this.zone) && yieldsScreen(pubs, this.nearby, this.selfId)) {
+      this.setScreen({ ...this.screen, on: false, error: 'taken' })
+      void this.applyScreen()
     }
 
     // Inside a zone nearby is the whole room, which hears itself in full.
@@ -474,31 +493,44 @@ export class MediaClient implements MediaControls {
     await this.applyCamera()
   }
 
-  // A share never restarts by itself: the picker needs a gesture.
+  // A share never restarts by itself: the picker needs a gesture. The room
+  // tells what is on air; anything that turned the share off meanwhile
+  // (leaving the room, another share) unpublishes it before permissions
+  // may widen again.
   private async applyScreen(): Promise<void> {
     const room = this.room
     const on = this.screen.on
     if (!room || this.screen.busy || this.screenLive === on || !this.canApply(on)) return
     const session = this.session
-    this.setScreen({ on, busy: true, error: null })
-    let live = false
-    let error: DeviceError | null = null
+    this.setScreen({ ...this.screen, busy: true })
+    let error: ScreenError | null = null
     try {
-      live = await room.setScreenShareEnabled(on)
+      await room.setScreenShareEnabled(on)
     } catch (err) {
       error = deviceError(err)
     }
     if (session !== this.session) {
-      if (live) void room.setScreenShareEnabled(false).catch(() => {})
+      if (room.screenShared()) void room.setScreenShareEnabled(false).catch(() => {})
       return
     }
-    if (error) {
-      this.screenLive = on ? false : null
-      return this.setScreen({ on: false, busy: false, error })
-    }
-    this.screenLive = live
-    this.setScreen({ on: live && !shouldStop(this.zone), busy: false, error: null })
-    await this.applyScreen()
+    this.screenLive = room.screenShared()
+    const want = this.screen.on && this.screenLive && !shouldStop(this.zone)
+    this.setScreen({ on: want, busy: false, error: error ?? this.screen.error })
+    // Only a share that came up unwanted is stopped again here; a stop that
+    // left it on air keeps permissions held back until the next reconnect.
+    if (on && this.screenLive && !want) return this.applyScreen()
+    this.applyPermissions()
+  }
+
+  // A reconnect may have republished the share, or the browser may have
+  // ended it meanwhile: follow the room and stop what must not stay on air.
+  private resyncScreen(): void {
+    const room = this.room
+    if (!room || this.screen.busy) return
+    this.screenLive = room.screenShared()
+    if (this.screen.on && (!this.screenLive || shouldStop(this.zone))) this.setScreen({ on: false, busy: false, error: null })
+    this.applyPermissions()
+    void this.applyScreen()
   }
 
   private renderScreen(): void {
@@ -532,7 +564,7 @@ export class MediaClient implements MediaControls {
     this.view.setCamera(state)
   }
 
-  private setScreen(state: DeviceState): void {
+  private setScreen(state: ShareState): void {
     this.screen = state
     this.renderScreen()
   }
