@@ -55,7 +55,7 @@ on, none turns it off, and a partial set is an error.
 With the LiveKit variables set, each player gets a LiveKit token right after
 `welcome` (`media`). Media or not, the server sends each player the set of
 players within earshot (`nearby`): a pair becomes near at 4 tiles and stops
-at more than 5. Meeting rooms and private booths are zones of the map
+at more than 5. The meeting room and the private rooms are zones of the map
 (`zones` layer): inside one, earshot is everyone in the same zone at any
 distance and nobody outside, not even at the door, and each player is told
 its own zone (`zone`) at join and whenever it crosses a border. Tokens last
@@ -104,15 +104,29 @@ nothing survives a restart. Message text, recipients and client ids never
 reach the logs. Rules and formats are in the
 [protocol spec](specs/phase1-protocol.md#chat).
 
-In the browser the map tints each zone with its name, and a strip at the
-top left shows the room you are in ("Sala 1 — reunião"). Inside a zone the
-"Perto" tab takes the room's name and warns that only the room sees it; the
-list of people marks who is in your room ("na sala"), near you ("perto") or
-in another room, read from positions and the public map. Clicking someone's
-avatar or name opens a direct conversation; its tab closes with ×, the
-Delete key or "Fechar conversa". Names used by more than one person get a
-short tag derived from their id (`Ana #k3f9`) in the list, the chat and over
-the avatars.
+In the browser each zone has its own carpet and a sign with its name on the
+wall above it, the room you are in gets a thin outline, and a strip at the
+top left of the map shows it ("Ringue de box — privada"). Inside a zone the
+"Perto" tab takes the room's name and warns that only the room sees it.
+Clicking someone's avatar, or the message button next to their name, opens
+a direct conversation; its tab closes with ×, the Delete key or "Fechar
+conversa". Names used by more than one person get a short tag derived from
+their id (`Ana #k3f9`) in the lists, the chat and over the avatars.
+
+A sidebar on the left holds the panels: **Chat**, **Pessoas** (everyone with
+their avatar's head, where they are, who is talking, a direct message and
+"Ver no mapa"), **Salas** (the zones plus the open office and the kitchen,
+named by the map's `areas` layer, with who is in each and "Ver na visão
+geral"), **Avatar** (the editor) and **Configurações** (theme, microphone,
+camera and audio output while media is on, the default zoom, and Sair with
+OIDC). It shows your head, name and place on top and the latency at the
+bottom, collapses to a rail of icons (remembered in the browser), opens one
+panel at a time beside it over the map, and below 900 px becomes a drawer
+behind a menu button. Alt+1…5 pick its items and Esc closes the panel. "Ver
+no mapa" and "Ver na visão geral" switch to the overview, fitted beside the
+panel, and mark the person or the room for a few seconds. The media bar,
+the video tiles and the zoom stay on the map. Theme and devices are kept in
+`localStorage` only.
 
 ## Login
 
@@ -193,6 +207,43 @@ On SIGTERM the server turns not ready, closes sessions with 1001
 `"server restarting"` and exits within 10 s. Deployment notes are in
 [`docs/deploy.md`](docs/deploy.md).
 
+## Map and art
+
+`maps/office.tmj` and its tile atlas `web/public/game/office-tiles.png` are
+generated; do not edit them by hand. `tools/officeart` reads the floor plan
+in `tools/officeart/office.txt` (three 50×25 character grids: `floor`,
+`solid` for everything that blocks movement, and `decor` for art without
+collision, such as chairs, monitors and pictures), takes only the tiles it
+uses from the Kenney sheets in `art/kenney/` and the sprites drawn as text in
+`art/custom/`, scales them 2× with nearest neighbour to the 32 px tile and
+repeats each tile's edge pixels around it so that none bleeds into the next.
+Kenney tiles can be recolored on the way (`Paint` in
+`tools/officeart/manifest.go`, a source→target color map per tile), which
+gives the art the corporate palette while keeping its drawing.
+
+The office is an open room on grey carpet tiles with 12 workstations in two
+blocks of cubicles, back to back in two rows of three, each station three
+tiles wide with a white desk, side panels, drawers and its own mix of
+monitors, laptop, computer, plants and an aquarium, plus a lounge and a table
+for six. The meeting room, the private room and the ring look onto the office
+through glass partitions; outer walls are white with a graphite skirting. Above it sit the meeting room (`reuniao`, a `meeting` zone
+where screens can be shared) and the kitchen, which opens wide onto the
+office and is no zone, so talk there goes by distance as in the office; on
+its left the private room for six (`privada`) and on its right the boxing
+ring (`ringue`), both `private` zones. Each room has one door to the office. Tiles marked `~` are outside
+the building: they block and are drawn see-through, so the page background
+shows around the office's outline.
+
+```sh
+make art                                     # rewrites the map and the atlas
+make art ART_FLAGS="-sheet /tmp/officeart"   # also writes index.png (every tile with its gid and source) and map.png
+```
+
+It refuses to change which tiles block movement compared with the current
+map unless run with `-allow-mask-change`, and `go test ./tools/officeart`
+fails while the committed files differ from what it generates. The art is
+CC0; sources, versions and checksums are in [CREDITS.md](CREDITS.md).
+
 ## Development
 
 ```sh
@@ -201,13 +252,19 @@ make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
 make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -chat"   # bots also chat, reports echo latency
+make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -av"     # bots join with random looks (?av=)
 
 # token, removal and reconciliation checks against a running LiveKit (make livekit)
 VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime
 ```
 
-The wire protocol, zones and map format are specified in
-[`specs/phase1-protocol.md`](specs/phase1-protocol.md).
+The wire protocol, zones, avatar appearance and map format are specified in
+[`specs/phase1-protocol.md`](specs/phase1-protocol.md). Each player's look
+(`Player.appearance`) is checked against the `internal/avatar` catalog,
+remembered per identity while the process lives like the last position, and
+changed with `appearance` messages (3 in a row per identity, then one every
+5 seconds); `/ws?av=<skin.hair.hairColor.shirt.pants.acc>` picks it when
+joining, and without one it is derived from the id.
 
 ## License
 

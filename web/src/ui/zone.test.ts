@@ -8,6 +8,13 @@ describe('zone view', () => {
   it('names the room and its kind', () => {
     expect(zoneText(sala)).toBe('Sala 1 — reunião')
     expect(zoneText(cabine)).toBe('Cabine — privada')
+    expect(zoneText({ id: 'ringue', name: 'Ringue de box', kind: 'private' })).toBe('Ringue de box — privada')
+  })
+
+  it('does not repeat a kind the name already says', () => {
+    expect(zoneText({ id: 'reuniao', name: 'Sala de Reunião', kind: 'meeting' })).toBe('Sala de Reunião')
+    expect(zoneText({ id: 'privada', name: 'Sala privada', kind: 'private' })).toBe('Sala privada')
+    expect(zoneText({ id: 'privada', name: 'Sala privada', kind: 'meeting' })).toBe('Sala privada — reunião')
   })
 
   it('announces entering, leaving and switching rooms only', () => {

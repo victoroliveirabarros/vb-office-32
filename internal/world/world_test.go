@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 )
 
@@ -113,7 +114,7 @@ func TestStepMovement(t *testing.T) {
 			enqueue(t, s, "a", 1, tt.dir)
 			d := s.Step(at(0))
 
-			want := Player{ID: "a", Name: "A", Pos: tt.wantPos, Dir: tt.dir}
+			want := Player{ID: "a", Name: "A", Pos: tt.wantPos, Dir: tt.dir, Appearance: avatar.Default("a")}
 			if got := s.Players()[0]; got != want {
 				t.Errorf("player = %+v, want %+v", got, want)
 			}
@@ -134,7 +135,7 @@ func TestStepWallTurnsAndAcks(t *testing.T) {
 	enqueue(t, s, "a", 7, Right)
 	d := s.Step(at(0))
 
-	want := Player{ID: "a", Name: "A", Pos: tilemap.Point{X: 1}, Dir: Right}
+	want := Player{ID: "a", Name: "A", Pos: tilemap.Point{X: 1}, Dir: Right, Appearance: avatar.Default("a")}
 	if len(d.Moved) != 1 || d.Moved[0] != want {
 		t.Errorf("moved = %+v, want [%+v]", d.Moved, want)
 	}
@@ -304,7 +305,7 @@ func TestReconnectRestoresPosition(t *testing.T) {
 	}
 	s.Join("b", "B")
 
-	want := Player{ID: "a", Name: "A", Pos: tilemap.Point{X: 1}, Dir: Right}
+	want := Player{ID: "a", Name: "A", Pos: tilemap.Point{X: 1}, Dir: Right, Appearance: avatar.Default("a")}
 	if got := s.Join("a", "A"); got != want {
 		t.Errorf("rejoin = %+v, want %+v", got, want)
 	}
@@ -364,5 +365,85 @@ func TestLastPositionsAreCapped(t *testing.T) {
 	}
 	if got := s.Join("a", "a").Pos; got != (tilemap.Point{}) {
 		t.Errorf("evicted a joined at %v, want spawn {0 0}", got)
+	}
+}
+
+// otherLook returns a valid look different from a.
+func otherLook(a avatar.Appearance) avatar.Appearance {
+	a.Shirt = (a.Shirt + 1) % uint8(avatar.Count(avatar.Shirt))
+	return a
+}
+
+func TestJoinDefaultAppearance(t *testing.T) {
+	s := NewSpace(asciiMap(t, "0..."))
+	for _, id := range []string{"a", "b", "guest:ana"} {
+		if got, want := s.Join(id, id).Appearance, avatar.Default(id); got != want {
+			t.Errorf("join %s: appearance = %v, want default %v", id, got, want)
+		}
+	}
+}
+
+func TestSetAppearance(t *testing.T) {
+	s := NewSpace(asciiMap(t, "0..."))
+	s.Join("a", "A")
+	look := otherLook(avatar.Default("a"))
+
+	p, changed := s.SetAppearance("a", look)
+	if !changed || p.Appearance != look || p.ID != "a" {
+		t.Errorf("set = %+v, %v; want look %v changed", p, changed, look)
+	}
+	if got := s.Players()[0].Appearance; got != look {
+		t.Errorf("players appearance = %v, want %v", got, look)
+	}
+	if p, changed := s.SetAppearance("a", look); changed || p.Appearance != look {
+		t.Errorf("same look: %+v, %v; want unchanged", p, changed)
+	}
+	bad := look
+	bad.Hair = uint8(avatar.Count(avatar.Hair))
+	if p, changed := s.SetAppearance("a", bad); changed || p.Appearance != look {
+		t.Errorf("look outside the catalog: %+v, %v; want %v unchanged", p, changed, look)
+	}
+	if _, changed := s.SetAppearance("ghost", look); changed {
+		t.Error("unknown player changed")
+	}
+	if got, ok := s.Player("a"); !ok || got.Appearance != look {
+		t.Errorf("player = %+v, %v; want look %v", got, ok, look)
+	}
+	if _, ok := s.Player("ghost"); ok {
+		t.Error("unknown player found")
+	}
+	if d := s.Step(at(0)); len(d.Moved) != 0 {
+		t.Errorf("moved = %+v, want a look change out of state", d.Moved)
+	}
+}
+
+func TestAppearanceRemembered(t *testing.T) {
+	s := NewSpace(asciiMap(t, "0..."))
+	s.Join("a", "A")
+	look := otherLook(avatar.Default("a"))
+	s.SetAppearance("a", look)
+
+	if got := s.Join("a", "A").Appearance; got != look {
+		t.Errorf("join while present: appearance = %v, want %v kept", got, look)
+	}
+	s.Leave("a")
+	if got := s.Join("a", "A").Appearance; got != look {
+		t.Errorf("rejoin: appearance = %v, want %v", got, look)
+	}
+}
+
+func TestLastAppearancesAreCapped(t *testing.T) {
+	s := NewSpace(asciiMap(t, "0..."))
+	s.lastCap = 2
+	for _, id := range []string{"a", "b", "c"} {
+		s.Join(id, id)
+		s.SetAppearance(id, otherLook(avatar.Default(id)))
+		s.Leave(id)
+	}
+	if got, want := s.Join("b", "b").Appearance, otherLook(avatar.Default("b")); got != want {
+		t.Errorf("b rejoined with %v, want remembered %v", got, want)
+	}
+	if got, want := s.Join("a", "a").Appearance, avatar.Default("a"); got != want {
+		t.Errorf("evicted a rejoined with %v, want default %v", got, want)
 	}
 }

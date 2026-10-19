@@ -102,3 +102,23 @@ func TestRunReadsLargeHistory(t *testing.T) {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
+
+func TestRunWithAppearance(t *testing.T) {
+	url := serve(t)
+	var out bytes.Buffer
+	cfg := config{url: url, n: 3, duration: 300 * time.Millisecond, step: 100 * time.Millisecond, chatEvery: time.Hour, av: true}
+	if err := run(t.Context(), cfg, &out); err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "bots:     3 connected, 0 failed") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
+
+func TestRandomLookIsValid(t *testing.T) {
+	for range 100 {
+		if a := randomLook(); !a.Valid() {
+			t.Fatalf("random look %v outside the catalog", a)
+		}
+	}
+}

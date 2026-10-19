@@ -1,0 +1,32 @@
+# Aquarium with fish (32x16), 2 tiles on a desk. CC0 1.0, vb-office-32.
+. transparent
+k 1f2a33
+F 3b4a57
+W 9ee0f5
+w 5cc3e6
+d 3ea7cf
+b ffffff
+o f28c28
+O ffd166
+y e85d3a
+g 6cc07a
+G 3f9a5a
+s d9c49a
+S b89c6a
+
+................................
+..kkkkkkkkkkkkkkkkkkkkkkkkkkkk..
+..kFFFFFFFFFFFFFFFFFFFFFFFFFFk..
+..kWWWWWWWWWWWWWWWWWWWWWWWWWWk..
+..kwwwbwwwwwwwwwwwwwwwwbwwwwwk..
+..kwwwwwwwwooOwwwwwwwwwwwwbwwk..
+..kwgwwwwwoooowwwwwwwwwwwwwwwk..
+..kwGgwwwwwwwwwwwwwwwyyOwwwgwk..
+..kdGgdddddddddddddddyyddddGgk..
+..kdGGddddddddddddddddddddGGgk..
+..kssSssssSsssssSssssSsssssSsk..
+..kkkkkkkkkkkkkkkkkkkkkkkkkkkk..
+................................
+................................
+................................
+................................

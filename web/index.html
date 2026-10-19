@@ -3,75 +3,250 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="preload" href="/fonts/montserrat-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <title>vb-office-32</title>
   </head>
   <body>
     <div id="game"></div>
-    <div id="status" class="badge" hidden></div>
-    <div id="latency" class="badge" hidden></div>
-    <div class="hud-corner">
-      <button id="logout" class="button" type="button" hidden>Sair</button>
-      <div id="zone" class="zone-strip" hidden></div>
-    </div>
+    <div id="status" class="pill brand status" hidden></div>
+    <button id="menu" class="brand menu-button" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="shell" hidden>
+      <svg class="icon" aria-hidden="true"><use href="/icons.svg#menu" /></svg><span id="menu-badge" class="nav-badge menu-badge" aria-hidden="true" hidden></span>
+    </button>
+    <div id="zone" class="pill brand zone-strip" hidden></div>
     <div id="zone-status" class="sr-only" role="status"></div>
+    <div id="zoom" class="brand zoom" role="group" aria-label="Zoom do mapa" hidden>
+      <button id="zoom-in" class="zoom-button" type="button" aria-label="Aproximar" title="Aproximar (+)" aria-keyshortcuts="+">
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-in" /></svg>
+      </button>
+      <span id="zoom-level" class="zoom-level" aria-hidden="true">
+        <span id="zoom-level-value" class="zoom-level-value"></span>
+        <svg class="icon zoom-overview"><use href="/icons.svg#map" /></svg>
+      </span>
+      <button id="zoom-out" class="zoom-button" type="button" aria-label="Afastar" title="Afastar (−), até a visão geral" aria-keyshortcuts="-">
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-out" /></svg>
+      </button>
+      <button id="zoom-reset" class="zoom-button zoom-reset" type="button" aria-label="Zoom padrão" title="Zoom padrão (0)" aria-keyshortcuts="0">
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#scan" /></svg>
+      </button>
+      <span id="zoom-status" class="sr-only" role="status"></span>
+    </div>
     <div id="media-tiles" hidden></div>
     <div id="media-stage" hidden><span id="media-stage-label"></span></div>
-    <div id="media-bar" hidden>
+    <div id="media-bar" class="brand" hidden>
       <button id="media-mic" class="media-button" type="button" aria-pressed="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /><path class="slash" d="M3 3l18 18" /></svg>
+        <svg class="icon icon-on" aria-hidden="true"><use href="/icons.svg#mic" /></svg>
+        <svg class="icon icon-off" aria-hidden="true"><use href="/icons.svg#mic-off" /></svg>
       </button>
       <button id="media-camera" class="media-button" type="button" aria-pressed="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /><path class="slash" d="M3 3l18 18" /></svg>
+        <svg class="icon icon-on" aria-hidden="true"><use href="/icons.svg#video" /></svg>
+        <svg class="icon icon-off" aria-hidden="true"><use href="/icons.svg#video-off" /></svg>
       </button>
-      <button id="media-screen" class="button" type="button" aria-pressed="false" hidden>Compartilhar tela</button>
-      <button id="media-unlock" class="button" type="button" hidden>Ativar áudio</button>
+      <button id="media-screen" class="button media-screen" type="button" aria-pressed="false" hidden>
+        <svg class="icon icon-on" aria-hidden="true"><use href="/icons.svg#screen-share-off" /></svg>
+        <svg class="icon icon-off" aria-hidden="true"><use href="/icons.svg#screen-share" /></svg>
+        <span id="media-screen-text" class="media-screen-text">Compartilhar tela</span>
+      </button>
+      <button id="media-unlock" class="button button-primary" type="button" hidden>
+        <svg class="icon" aria-hidden="true"><use href="/icons.svg#volume-2" /></svg><span>Ativar áudio</span>
+      </button>
       <span id="media-note" hidden></span>
     </div>
     <div id="media-audio" hidden></div>
-    <aside id="chat" class="chat" aria-label="Chat" hidden>
-      <button id="chat-toggle" class="chat-toggle" type="button" aria-expanded="false" aria-controls="chat-panel">
-        <span>Chat</span><span id="chat-toggle-badge" class="chat-badge" aria-hidden="true" hidden></span>
-      </button>
-      <section id="chat-panel" class="chat-panel" hidden>
-        <div class="chat-header">
-          <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Conversas"></div>
-          <button id="chat-close" class="chat-close" type="button" aria-label="Fechar chat" title="Fechar chat">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+    <div id="scrim" class="scrim" hidden></div>
+    <div id="shell" class="shell" hidden>
+      <aside id="sidebar" class="sidebar" aria-label="Menu do escritório">
+        <div class="sidebar-head">
+          <div class="sidebar-brand">
+            <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="/icons.svg#building-2" /></svg></span>
+            <span class="brand-name">vb-office-32</span>
+          </div>
+          <button id="drawer-close" class="icon-button drawer-close" type="button" aria-label="Fechar menu" title="Fechar menu">
+            <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg>
           </button>
         </div>
-        <button id="chat-people-toggle" class="chat-people-toggle" type="button" aria-expanded="false" aria-controls="chat-people">Presentes</button>
-        <div id="chat-people" class="chat-people" hidden>
-          <ul id="chat-roster" class="chat-roster" aria-label="Presentes"></ul>
+        <div id="profile" class="profile" hidden>
+          <span class="profile-avatar"><canvas id="profile-head" class="head" width="16" height="16" aria-hidden="true"></canvas></span>
+          <span class="profile-text">
+            <span id="profile-name" class="profile-name" dir="auto"></span>
+            <span id="profile-place" class="profile-place"></span>
+          </span>
         </div>
-        <div id="chat-tabpanel" class="chat-tabpanel" role="tabpanel">
-          <div class="chat-notice-row">
-            <p id="chat-notice" class="chat-notice"></p>
-            <button id="chat-dm-close" class="chat-dm-close" type="button" hidden>Fechar conversa</button>
-          </div>
-          <div id="chat-log" class="chat-log" role="log" aria-label="Mensagens" aria-busy="false" tabindex="0"></div>
+        <nav class="sidebar-nav" aria-label="Painéis">
+          <ul class="nav-list">
+            <li>
+              <button id="nav-chat" class="nav-item" type="button" data-item="chat" data-tip="Chat" aria-keyshortcuts="Alt+1" aria-controls="panel" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#message-circle" /></svg><span class="nav-label">Chat</span><span id="nav-chat-badge" class="nav-badge" aria-hidden="true" hidden></span>
+              </button>
+            </li>
+            <li>
+              <button id="nav-people" class="nav-item" type="button" data-item="people" data-tip="Pessoas" aria-keyshortcuts="Alt+2" aria-controls="panel" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#users" /></svg><span class="nav-label">Pessoas</span><span id="nav-people-badge" class="nav-badge" aria-hidden="true" hidden></span>
+              </button>
+            </li>
+            <li>
+              <button id="nav-rooms" class="nav-item" type="button" data-item="rooms" data-tip="Salas" aria-keyshortcuts="Alt+3" aria-controls="panel" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#door-open" /></svg><span class="nav-label">Salas</span>
+              </button>
+            </li>
+            <li>
+              <button id="avatar-edit" class="nav-item" type="button" data-item="avatar" data-tip="Avatar" aria-keyshortcuts="Alt+4" aria-haspopup="dialog" disabled>
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#shirt" /></svg><span class="nav-label">Avatar</span>
+              </button>
+            </li>
+            <li>
+              <button id="nav-settings" class="nav-item" type="button" data-item="settings" data-tip="Configurações" aria-keyshortcuts="Alt+5" aria-controls="panel" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#settings" /></svg><span class="nav-label" data-short="Ajustes">Configurações</span>
+              </button>
+            </li>
+          </ul>
+        </nav>
+        <div class="sidebar-foot">
+          <span id="latency" class="latency" title="Latência até o servidor" hidden></span>
+          <button id="sidebar-toggle" class="nav-item sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" data-tip="Expandir menu">
+            <svg class="icon icon-collapse" aria-hidden="true"><use href="/icons.svg#panel-left-close" /></svg>
+            <svg class="icon icon-expand" aria-hidden="true"><use href="/icons.svg#panel-left-open" /></svg>
+            <span class="nav-label">Recolher</span>
+          </button>
         </div>
-        <form id="chat-form" class="chat-form">
-          <textarea id="chat-input" class="chat-input" rows="2" dir="auto" aria-label="Mensagem" aria-describedby="chat-status" placeholder="Mensagem (Enter envia, Shift+Enter quebra linha)"></textarea>
-          <div class="chat-meta">
-            <span id="chat-status" class="chat-status" role="status"></span>
-            <span id="chat-count" class="chat-count" aria-hidden="true">0/500</span>
-            <button id="chat-send" class="button chat-send" type="submit">Enviar</button>
+      </aside>
+      <section id="panel" class="panel" aria-labelledby="panel-title" hidden>
+        <header class="panel-header">
+          <h2 id="panel-title" class="panel-title"></h2>
+          <button id="panel-close" class="icon-button panel-close" type="button" aria-label="Fechar painel" title="Fechar painel (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg>
+          </button>
+        </header>
+        <div id="chat-panel" class="panel-body chat-panel" hidden>
+          <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Conversas"></div>
+          <div id="chat-tabpanel" class="chat-tabpanel" role="tabpanel">
+            <div class="chat-notice-row">
+              <p id="chat-notice" class="chat-notice"></p>
+              <button id="chat-dm-close" class="button button-ghost chat-dm-close" type="button" hidden>
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg><span>Fechar conversa</span>
+              </button>
+            </div>
+            <div id="chat-log" class="chat-log" role="log" aria-label="Mensagens" aria-busy="false" tabindex="0"></div>
           </div>
-        </form>
+          <form id="chat-form" class="chat-form">
+            <textarea id="chat-input" class="chat-input" rows="2" dir="auto" aria-label="Mensagem" aria-describedby="chat-status" placeholder="Mensagem (Enter envia, Shift+Enter quebra linha)"></textarea>
+            <div class="chat-meta">
+              <span id="chat-status" class="chat-status" role="status"></span>
+              <span id="chat-count" class="chat-count" aria-hidden="true">0/500</span>
+              <button id="chat-send" class="button button-primary chat-send" type="submit">
+                <svg class="icon" aria-hidden="true"><use href="/icons.svg#send" /></svg><span>Enviar</span>
+              </button>
+            </div>
+          </form>
+        </div>
+        <div id="people-panel" class="panel-body people-panel" hidden>
+          <div id="people-search-row" class="panel-search" hidden>
+            <svg class="icon" aria-hidden="true"><use href="/icons.svg#search" /></svg>
+            <input id="people-search" class="search-field" type="search" placeholder="Buscar por nome" aria-label="Buscar pessoas por nome" autocomplete="off" />
+          </div>
+          <p id="people-summary" class="panel-note" role="status"></p>
+          <ul id="people-list" class="people-list" aria-label="Pessoas no escritório"></ul>
+        </div>
+        <div id="rooms-panel" class="panel-body rooms-panel" hidden>
+          <p class="panel-note">Salas fecham o áudio e o chat “Perto” para quem está dentro; nas áreas abertas a conversa é por proximidade.</p>
+          <ul id="rooms-list" class="rooms-list" aria-label="Salas e áreas"></ul>
+        </div>
+        <div id="settings-panel" class="panel-body settings-panel" hidden>
+          <section class="settings-group" aria-labelledby="settings-theme-title">
+            <h3 id="settings-theme-title" class="settings-title">Tema</h3>
+            <div id="theme-choices" class="segmented" role="radiogroup" aria-labelledby="settings-theme-title">
+              <label class="segment">
+                <input class="segment-input" type="radio" name="theme" value="system" />
+                <span class="segment-face"><svg class="icon" aria-hidden="true"><use href="/icons.svg#monitor" /></svg>Sistema</span>
+              </label>
+              <label class="segment">
+                <input class="segment-input" type="radio" name="theme" value="light" />
+                <span class="segment-face"><svg class="icon" aria-hidden="true"><use href="/icons.svg#sun" /></svg>Claro</span>
+              </label>
+              <label class="segment">
+                <input class="segment-input" type="radio" name="theme" value="dark" />
+                <span class="segment-face"><svg class="icon" aria-hidden="true"><use href="/icons.svg#moon" /></svg>Escuro</span>
+              </label>
+            </div>
+          </section>
+          <section id="settings-devices" class="settings-group" aria-labelledby="settings-devices-title" hidden>
+            <h3 id="settings-devices-title" class="settings-title">Áudio e vídeo</h3>
+            <div id="device-audioinput-row" class="settings-field">
+              <label class="field-label" for="device-audioinput">Microfone</label>
+              <select id="device-audioinput" class="field select" data-kind="audioinput"></select>
+            </div>
+            <div id="device-videoinput-row" class="settings-field">
+              <label class="field-label" for="device-videoinput">Câmera</label>
+              <select id="device-videoinput" class="field select" data-kind="videoinput"></select>
+            </div>
+            <div id="device-audiooutput-row" class="settings-field">
+              <label class="field-label" for="device-audiooutput">Saída de áudio</label>
+              <select id="device-audiooutput" class="field select" data-kind="audiooutput"></select>
+            </div>
+            <p id="settings-devices-note" class="panel-note" role="status"></p>
+          </section>
+          <section class="settings-group" aria-labelledby="settings-map-title">
+            <h3 id="settings-map-title" class="settings-title">Mapa</h3>
+            <button id="settings-zoom-reset" class="button button-ghost settings-button" type="button">
+              <svg class="icon" aria-hidden="true"><use href="/icons.svg#scan" /></svg><span>Voltar ao zoom padrão</span>
+            </button>
+          </section>
+          <section class="settings-group" aria-labelledby="settings-keys-title">
+            <h3 id="settings-keys-title" class="settings-title">Atalhos</h3>
+            <dl class="shortcuts">
+              <div><dt><kbd>Enter</kbd></dt><dd>Escrever no chat</dd></div>
+              <div><dt><kbd>Alt</kbd> + <kbd>1</kbd>…<kbd>5</kbd></dt><dd>Itens do menu</dd></div>
+              <div><dt><kbd>+</kbd> <kbd>−</kbd> <kbd>0</kbd></dt><dd>Zoom do mapa</dd></div>
+              <div><dt><kbd>Esc</kbd></dt><dd>Fechar o painel</dd></div>
+            </dl>
+          </section>
+          <section id="settings-account" class="settings-group" aria-labelledby="settings-account-title" hidden>
+            <h3 id="settings-account-title" class="settings-title">Conta</h3>
+            <button id="logout" class="button button-ghost button-danger settings-button" type="button">
+              <svg class="icon" aria-hidden="true"><use href="/icons.svg#log-out" /></svg><span>Sair</span>
+            </button>
+          </section>
+        </div>
       </section>
-    </aside>
+    </div>
+    <dialog id="avatar-editor" class="editor" aria-labelledby="avatar-editor-title">
+      <form class="editor-form" method="dialog">
+        <div class="editor-header">
+          <h2 id="avatar-editor-title" class="editor-title">Personalizar avatar</h2>
+          <button id="avatar-close" class="icon-button" type="button" aria-label="Fechar sem salvar" title="Fechar sem salvar">
+            <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg>
+          </button>
+        </div>
+        <div class="editor-body">
+          <div class="editor-preview">
+            <canvas id="avatar-preview" class="editor-canvas" width="64" height="96" role="img" aria-label="Prévia do avatar"></canvas>
+            <button id="avatar-turn" class="button button-ghost editor-turn" type="button">Girar</button>
+          </div>
+          <div id="avatar-options" class="editor-options"></div>
+        </div>
+        <div class="editor-actions">
+          <button id="avatar-random" class="button button-ghost" type="button">Aleatório</button>
+          <button id="avatar-cancel" class="button editor-cancel" type="button">Cancelar</button>
+          <button id="avatar-save" class="button button-primary" type="submit" value="save">Salvar</button>
+        </div>
+      </form>
+    </dialog>
     <div id="login" class="overlay" hidden>
-      <div class="panel">
-        <p>vb-office-32</p>
-        <a class="button" href="/auth/login">Entrar</a>
+      <div class="card">
+        <h1 class="card-title">vb-office-32</h1>
+        <p class="card-text">Entre com a conta da empresa para chegar ao escritório.</p>
+        <a class="button button-primary" href="/auth/login">Entrar</a>
       </div>
     </div>
     <div id="join" class="overlay" hidden>
-      <form id="join-form">
-        <label for="join-name">Seu nome</label>
-        <input id="join-name" maxlength="24" autocomplete="nickname" required />
-        <p id="join-error" hidden>Use 1–24 caracteres: letras, números, espaço, _ ou -.</p>
-        <button type="submit">Entrar</button>
+      <form id="join-form" class="card">
+        <h1 class="card-title">vb-office-32</h1>
+        <label class="field-label" for="join-name">Seu nome</label>
+        <input id="join-name" class="field" maxlength="24" autocomplete="nickname" required />
+        <p id="join-error" class="field-error" hidden>
+          <svg class="icon" aria-hidden="true"><use href="/icons.svg#circle-alert" /></svg><span>Use 1–24 caracteres: letras, números, espaço, _ ou -.</span>
+        </p>
+        <button class="button button-primary" type="submit">Entrar</button>
       </form>
     </div>
     <script type="module" src="/src/main.ts"></script>

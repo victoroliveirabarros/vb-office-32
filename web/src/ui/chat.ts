@@ -2,14 +2,13 @@ import { clean, MAX_LINES, MAX_RUNES } from '../chat/clean'
 import type { Cleaned } from '../chat/clean'
 import { atBottom, inputAction, keepFromGame, shouldFocusChat } from '../chat/keys'
 import type { TypingGate } from '../chat/keys'
-import { Roster } from '../chat/roster'
-import type { Person } from '../chat/roster'
+import type { RosterFeed } from '../chat/feed'
+import type { Person, Roster } from '../chat/roster'
 import { ChatState } from '../chat/state'
 import type { Entry, FailReason, Tab, TabKey } from '../chat/state'
 import type { Connection, ConnectionStatus } from '../net/connection'
-import type { ZoneMap } from '../game/zones'
 import type { ServerMessage } from '../net/protocol'
-import { requireElement } from './dom'
+import { icon, requireElement } from './dom'
 
 // Everything user-supplied reaches the page through textContent only.
 
@@ -113,20 +112,21 @@ function sameChildren(parent: Element, nodes: readonly Element[]): boolean {
 export type ChatApi = {
   /** Opens the direct conversation with id, unless it is us or offline. */
   openDirect(id: string): void
-  setZones(zones: ZoneMap): void
+  /** The chat's panel was shown or hidden. */
+  setShown(shown: boolean): void
+  /** Puts the cursor in the message box. */
+  focus(): void
 }
 
-export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
-  const root = requireElement('chat', HTMLElement)
-  const toggle = requireElement('chat-toggle', HTMLButtonElement)
-  const toggleBadge = requireElement('chat-toggle-badge', HTMLSpanElement)
-  const panel = requireElement('chat-panel', HTMLElement)
-  const close = requireElement('chat-close', HTMLButtonElement)
+/** Where the chat lives: a panel of the sidebar. */
+export type ChatHost = {
+  show(): void
+  unread(n: number): void
+}
+
+export function createChat(link: ChatLink, gate: TypingGate, feed: RosterFeed, host: ChatHost): ChatApi {
   const tabList = requireElement('chat-tabs', HTMLDivElement)
   const tabPanel = requireElement('chat-tabpanel', HTMLDivElement)
-  const peopleToggle = requireElement('chat-people-toggle', HTMLButtonElement)
-  const people = requireElement('chat-people', HTMLDivElement)
-  const peopleList = requireElement('chat-roster', HTMLUListElement)
   const notice = requireElement('chat-notice', HTMLParagraphElement)
   const closeDirect = requireElement('chat-dm-close', HTMLButtonElement)
   const log = requireElement('chat-log', HTMLDivElement)
@@ -136,24 +136,17 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
   const counter = requireElement('chat-count', HTMLSpanElement)
   const sendButton = requireElement('chat-send', HTMLButtonElement)
 
-  const roster = new Roster()
+  const roster = feed.roster
   const state = new ChatState()
   const entryViews = new WeakMap<Entry, EntryView>()
   const tabButtons = new Map<TabKey, { button: HTMLButtonElement; label: HTMLSpanElement; badge: HTMLSpanElement }>()
-  const personItems = new Map<string, { item: HTMLLIElement; button: HTMLButtonElement; name: HTMLSpanElement; tag: HTMLSpanElement }>()
   let tabSeq = 0
   let connected = false
   let shownTab: TabKey | null = null
   let draft = clean('')
   let error = ''
   let canSendHere = true
-
-  const setOpen = (open: boolean) => {
-    state.setOpen(open)
-    panel.hidden = !open
-    toggle.hidden = open
-    toggle.setAttribute('aria-expanded', String(open))
-  }
+  let unreadShown = -1
 
   const setError = (text: string) => {
     error = text
@@ -191,6 +184,7 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
           const x = el('span', 'chat-tab-close')
           x.setAttribute('aria-hidden', 'true')
           x.title = 'Fechar conversa'
+          x.append(icon('x'))
           button.append(x)
           button.setAttribute('aria-keyshortcuts', 'Delete')
         }
@@ -217,9 +211,8 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     if (!sameChildren(tabList, buttons)) tabList.replaceChildren(...buttons)
 
     const unread = state.unreadTotal()
-    toggleBadge.textContent = unread > 99 ? '99+' : String(unread)
-    toggleBadge.hidden = unread === 0
-    toggle.setAttribute('aria-label', tabAriaLabel('Abrir chat', unread))
+    if (unread !== unreadShown) host.unread(unread)
+    unreadShown = unread
   }
 
   const entryView = (entry: Entry): EntryView => {
@@ -265,39 +258,6 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     if (stick) log.scrollTop = log.scrollHeight
   }
 
-  const renderPeople = () => {
-    const list = roster.list()
-    peopleToggle.textContent = `Presentes (${list.length})`
-    const items = list.map((person) => {
-      let view = personItems.get(person.id)
-      if (!view) {
-        const item = el('li', 'chat-person')
-        const button = el('button', 'chat-person-button')
-        button.type = 'button'
-        const name = el('span', 'chat-person-name')
-        name.dir = 'auto'
-        const tag = el('span', 'chat-person-tag')
-        tag.dir = 'auto'
-        button.append(name, tag)
-        item.append(button)
-        const id = person.id
-        button.addEventListener('click', () => openDirect(id))
-        view = { item, button, name, tag }
-        personItems.set(id, view)
-      }
-      const tag = personTag(person, roster)
-      view.name.textContent = person.self ? `${person.label} (você)` : person.label
-      view.tag.textContent = tag?.text ?? ''
-      view.tag.hidden = tag === null
-      view.tag.dataset.kind = tag?.kind ?? ''
-      view.button.disabled = person.self
-      view.button.setAttribute('aria-label', personAriaLabel(person, tag))
-      return view.item
-    })
-    for (const id of [...personItems.keys()]) if (!roster.online(id)) personItems.delete(id)
-    if (!sameChildren(peopleList, items)) peopleList.replaceChildren(...items)
-  }
-
   const render = (forceBottom = false) => {
     const tab = state.tab(state.active)
     if (!tab) return
@@ -309,7 +269,6 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     closeDirect.setAttribute('aria-label', `Fechar conversa com ${tabLabel(tab, roster)}`)
     canSendHere = info.canSend
     renderLog(tab, forceBottom)
-    renderPeople()
     renderComposer()
   }
 
@@ -331,9 +290,7 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     const name = roster.name(id)
     if (name === undefined || id === roster.self) return
     state.openDirect(id, name)
-    people.hidden = true
-    peopleToggle.setAttribute('aria-expanded', 'false')
-    setOpen(true)
+    host.show()
     setError('')
     render(true)
     input.focus()
@@ -356,12 +313,10 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
   }
 
   const handle = (msg: ServerMessage) => {
-    const rosterChanged = roster.handle(msg)
     switch (msg.t) {
       case 'welcome': {
         const self = msg.d.players.find((p) => p.id === msg.d.selfId)
         state.welcome(msg.d.selfId, self?.name ?? '')
-        root.hidden = false
         return render()
       }
       case 'chat':
@@ -380,31 +335,14 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
         }
         return
     }
-    // A state message counts only when someone changed room.
-    if (rosterChanged) render()
   }
 
   link.onMessage(handle)
+  // Names, who is near and rooms show in the tabs and notices.
+  feed.onChange(() => render())
   link.onStatus((s: ConnectionStatus) => {
     connected = s === 'open'
     render()
-  })
-
-  toggle.addEventListener('click', () => {
-    setOpen(true)
-    render(true)
-    input.focus()
-  })
-  close.addEventListener('click', () => {
-    setOpen(false)
-    render()
-    toggle.focus()
-  })
-  peopleToggle.addEventListener('click', () => {
-    const stick = atBottom(log)
-    people.hidden = !people.hidden
-    peopleToggle.setAttribute('aria-expanded', String(!people.hidden))
-    if (stick) log.scrollTop = log.scrollHeight
   })
 
   tabList.addEventListener('keydown', (e) => {
@@ -435,8 +373,8 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
     input.focus()
   })
 
-  input.addEventListener('focus', () => gate.setTyping(true))
-  input.addEventListener('blur', () => gate.setTyping(false))
+  input.addEventListener('focus', () => gate.setTyping('chat', true))
+  input.addEventListener('blur', () => gate.setTyping('chat', false))
   input.addEventListener('input', () => {
     draft = clean(input.value)
     error = ''
@@ -453,30 +391,33 @@ export function createChat(link: ChatLink, gate: TypingGate): ChatApi {
   })
   input.addEventListener('keyup', (e) => e.stopPropagation())
 
-  // The log and the people list scroll with these keys; the game would walk.
+  // The log scrolls with these keys; the game would walk.
   const keepKeys = (e: KeyboardEvent) => {
     if (keepFromGame(e)) e.stopPropagation()
   }
-  root.addEventListener('keydown', keepKeys)
-  root.addEventListener('keyup', keepKeys)
+  log.addEventListener('keydown', keepKeys)
+  log.addEventListener('keyup', keepKeys)
 
   document.addEventListener('keydown', (e) => {
-    if (root.hidden || !shouldFocusChat(e, e.target instanceof HTMLElement ? e.target : null)) return
+    if (state.self === null || !shouldFocusChat(e, e.target instanceof HTMLElement ? e.target : null)) return
     // Before focus, or the Enter would land in the textarea as a newline.
     e.preventDefault()
-    setOpen(true)
+    host.show()
     render(true)
     input.focus()
   })
 
   closeDirect.addEventListener('click', () => closeTab(state.active))
 
-  setOpen(window.matchMedia('(min-width: 900px)').matches)
-
   return {
     openDirect,
-    setZones(zones) {
-      if (roster.setZones(zones)) render()
+    setShown(shown) {
+      if (shown === state.open) return
+      state.setOpen(shown)
+      render(shown)
+    },
+    focus() {
+      input.focus()
     },
   }
 }

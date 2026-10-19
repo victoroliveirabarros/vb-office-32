@@ -57,5 +57,28 @@ export function atBottom(el: ScrollLike, slack = 8): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= slack
 }
 
-/** Lets the chat take the keyboard away from the game while it is focused. */
-export type TypingGate = { setTyping(on: boolean): void }
+export type TypingOwner = 'chat' | 'editor' | 'sidebar'
+
+/** Lets the chat, the avatar editor or a field of the sidebar take the keyboard away from the game. */
+export type TypingGate = { setTyping(owner: TypingOwner, on: boolean): void }
+
+/** Who holds the keyboard; the game gets it back when nobody does. */
+export class TypingOwners {
+  private readonly owners = new Set<TypingOwner>()
+
+  get typing(): boolean {
+    return this.owners.size > 0
+  }
+
+  holds(owner: TypingOwner): boolean {
+    return this.owners.has(owner)
+  }
+
+  /** Reports whether typing changed. */
+  set(owner: TypingOwner, on: boolean): boolean {
+    const before = this.typing
+    if (on) this.owners.add(owner)
+    else this.owners.delete(owner)
+    return before !== this.typing
+  }
+}

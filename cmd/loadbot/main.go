@@ -1,6 +1,6 @@
 // Command loadbot connects random-walking bots to a vb-office-32 server and
 // reports ack latency; with -chat they also chat and it reports the echo
-// latency.
+// latency; with -av each joins with a random look.
 package main
 
 import (
@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 )
 
 var dirs = [...]string{"up", "down", "left", "right"}
@@ -38,6 +40,7 @@ type config struct {
 	// chatEvery stays above the server's 2 s per chat, so bots do not get
 	// rate_limited.
 	chatEvery time.Duration
+	av        bool
 }
 
 func main() {
@@ -48,6 +51,7 @@ func main() {
 	flag.DurationVar(&cfg.step, "step", 200*time.Millisecond, "interval between moves per bot")
 	flag.BoolVar(&cfg.chat, "chat", false, "bots also chat (everyone, nearby and direct)")
 	flag.DurationVar(&cfg.chatEvery, "chat-every", 3*time.Second, "interval between chats per bot")
+	flag.BoolVar(&cfg.av, "av", false, "bots join with a random appearance")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -144,7 +148,11 @@ type pendingMove struct {
 
 func runBot(ctx context.Context, cfg config, i int, st *stats) error {
 	name := fmt.Sprintf("bot-%d", i)
-	conn, _, err := websocket.Dial(ctx, cfg.url+"?name="+name, nil)
+	u := cfg.url + "?name=" + name
+	if cfg.av {
+		u += "&av=" + randomLook().String()
+	}
+	conn, _, err := websocket.Dial(ctx, u, nil)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
@@ -301,6 +309,14 @@ func chatMessage(cid, name string, i, n int) ([]byte, error) {
 		T string `json:"t"`
 		D chat   `json:"d"`
 	}{"chat", c})
+}
+
+func randomLook() avatar.Appearance {
+	var v [avatar.NumFields]uint8
+	for f := range v {
+		v[f] = uint8(rand.IntN(avatar.Count(avatar.Field(f))))
+	}
+	return avatar.FromFields(v)
 }
 
 func percentile(sorted []time.Duration, p float64) time.Duration {

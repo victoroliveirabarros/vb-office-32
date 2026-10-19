@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
@@ -60,8 +61,12 @@ type Session struct {
 	room    *Room
 	log     *slog.Logger
 
+	// look is the appearance asked for in the URL, applied when joining;
+	// nil keeps the remembered or default one.
+	look *avatar.Appearance
+
 	limiter   tokenBucket
-	chats     *chatLimits
+	limits    sessionLimits
 	out       chan []byte
 	done      chan struct{}
 	ended     chan struct{}
@@ -69,7 +74,7 @@ type Session struct {
 	closeWith closeReason
 }
 
-func newSession(id auth.Identity, conn *websocket.Conn, room *Room, chats *chatLimits, log *slog.Logger) *Session {
+func newSession(id auth.Identity, conn *websocket.Conn, room *Room, limits sessionLimits, log *slog.Logger) *Session {
 	return &Session{
 		id:      id.ID,
 		name:    id.Name,
@@ -78,7 +83,7 @@ func newSession(id auth.Identity, conn *websocket.Conn, room *Room, chats *chatL
 		room:    room,
 		log:     log,
 		limiter: newTokenBucket(messageRate, messageBurst),
-		chats:   chats,
+		limits:  limits,
 		out:     make(chan []byte, sendBuffer),
 		done:    make(chan struct{}),
 		ended:   make(chan struct{}),
@@ -172,6 +177,10 @@ func (s *Session) readLoop(ctx context.Context) error {
 				s.log.Debug("chat rejected", "reason", reason)
 				s.sendChatError(m.CID, reason)
 			}
+		case appearanceIn:
+			if err := s.appearance(ctx, avatar.Appearance(m), time.Now()); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -190,7 +199,7 @@ func (s *Session) chat(ctx context.Context, m chatIn, now time.Time) (string, er
 	case errors.Is(err, chat.ErrTooLong):
 		return chatTooLong, nil
 	}
-	if !s.chats.allow(s.id, now) {
+	if !s.limits.chat.allow(s.id, now) {
 		return chatRateLimited, nil
 	}
 	c := sessionChat{sess: s, cid: m.CID, scope: m.Scope, text: text}
@@ -198,6 +207,22 @@ func (s *Session) chat(ctx context.Context, m chatIn, now time.Time) (string, er
 		c.to = *m.To
 	}
 	return "", s.room.chat(ctx, c)
+}
+
+// appearance hands a look to the room. Only a look in the catalog spends a
+// token of the identity's appearance bucket; one outside the catalog or over
+// the limit is not applied, and the sender gets its current look back.
+func (s *Session) appearance(ctx context.Context, a avatar.Appearance, now time.Time) error {
+	req := sessionAppearance{sess: s, look: a}
+	switch {
+	case !a.Valid():
+		s.log.Debug("appearance rejected", "reason", "invalid", "look", a.String())
+	case !s.limits.appearance.allow(s.id, now):
+		s.log.Debug("appearance rejected", "reason", chatRateLimited)
+	default:
+		req.apply = true
+	}
+	return s.room.appearance(ctx, req)
 }
 
 func (s *Session) sendChatError(cid, reason string) {

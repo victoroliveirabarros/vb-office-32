@@ -16,8 +16,9 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 - WebSocket em `GET /ws`. A identidade depende do modo (`VB_OFFICE32_AUTH`):
   - `oidc` (padrão): identidade vem do cookie de sessão; `?name` é ignorado. Sem cookie válido (ausente, adulterado, expirado ou domínio fora da lista) → HTTP 401 antes do upgrade. Identidade = `"oidc:" + sub`; nome = claim `name` do provedor (fallback: parte local do email), sem caracteres de controle/formatação, trim, até 32 runes; acentos são válidos.
   - `guest` (desenvolvimento): `GET /ws?name=<nome>`. `name`: 1–24 chars, `[A-Za-z0-9 _-]`, trim de espaços. Inválido → HTTP 400 antes do upgrade. Identidade = `"guest:" + lowercase(name)`.
+- Em qualquer modo, `?av=<compacta>` opcional escolhe a aparência ao entrar, aplicada antes do `welcome` (ver [Aparência](#aparência)). Ausente, vazia ou inválida → ignorada (nunca recusa o upgrade).
 - Outra falha de autenticação → HTTP 401 com corpo genérico (`Unauthorized`), nunca o erro interno.
-- Mesma identidade conectando de novo derruba a sessão anterior (close code 4001, reason `"replaced"`).
+- Mesma identidade conectando de novo derruba a sessão anterior (close code 4001, reason `"replaced"`). Os outros só recebem `joined` se o nome ou a aparência mudou.
 - Em modo `oidc`, a conexão fecha com 4002 reason `"session expired"` quando a sessão (12 h) expira.
 - `GET /api/session` diz ao frontend qual tela mostrar: `oidc` → 200 `{id, name, auth: "oidc"}` ou 401 `{auth: "oidc"}`; `guest` → sempre 401 `{auth: "guest"}`. O email nunca é exposto.
 - Recusas antes do upgrade (HTTP, sem WebSocket; no browser aparecem como close 1006):
@@ -31,7 +32,7 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 ```
 
 - Mensagem do cliente > 8 KiB ou inválida → close 1008.
-- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`. O chat tem limites próprios, por identidade e por espaço, que não fecham a conexão (ver [Chat](#chat)).
+- Rate limit por conexão: token bucket de 20 mensagens/s com burst 40. Conta toda mensagem recebida, inclusive inválida. Excedeu → close 1008 reason `"rate limit"`. O chat e a aparência têm limites próprios, por identidade (e o chat também por espaço), que não fecham a conexão (ver [Chat](#chat) e [Aparência](#aparência)).
 - Cliente lento (buffer de envio cheio, 256 mensagens) → close 1008 reason `"slow consumer"`.
 - Shutdown do servidor → close 1001 reason `"server restarting"`. O cliente reconecta com backoff.
 
@@ -48,9 +49,12 @@ Fonte única de verdade entre `internal/` (Go) e `web/` (TS). Qualquer divergên
 ## Tipos compartilhados
 
 ```ts
-type Player = { id: string; name: string; x: number; y: number; dir: Dir }
-type Pos    = { id: string; x: number; y: number; dir: Dir }
+type Appearance = { skin: number; hair: number; hairColor: number; shirt: number; pants: number; acc: number }
+type Player     = { id: string; name: string; x: number; y: number; dir: Dir; appearance: Appearance }
+type Pos        = { id: string; x: number; y: number; dir: Dir }
 ```
+
+`Player.appearance` vem sempre, com os seis campos (ver [Aparência](#aparência)).
 
 ## Cliente → Servidor
 
@@ -59,13 +63,14 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 | `move` | `{ seq: number, dir: Dir }` | Intenção de 1 passo. `seq` uint32 crescente por conexão. Fila por jogador com cap `MaxPendingInputs` (8); excedente descartado. |
 | `ping` | `{ ts: number }` | Servidor responde `pong` com mesmo `ts`. |
 | `chat` | `{ cid: string, scope: Scope, to?: string, text: string }` | Ver [Chat](#chat). `cid` é do cliente, só para casar eco e erro. |
+| `appearance` | `Appearance` | Pede nova aparência. Campos ausentes = 0; chaves desconhecidas ignoradas. Ver [Aparência](#aparência). |
 
 ## Servidor → Cliente
 
 | `t` | `d` | Quando |
 |---|---|---|
 | `welcome` | `{ selfId: string, mapId: string, tickRate: number, stepMs: number, players: Player[] }` | Logo após conectar. `players` inclui o próprio. |
-| `joined` | `Player` | Outro jogador entrou. |
+| `joined` | `Player` | Outro jogador entrou, ou reconectou derrubando a sessão anterior com nome ou aparência diferente (o cliente substitui o jogador de mesmo `id`). |
 | `left` | `{ id: string }` | Jogador saiu. |
 | `state` | `{ tick: number, ack: number, players: Pos[] }` | Fim de tick em que houve mudança OU o `ack` do destinatário avançou. `players` = só quem mudou posição/direção no tick. `ack` = último `seq` processado do destinatário (0 se nenhum). |
 | `pong` | `{ ts: number }` | Resposta a `ping`. |
@@ -75,8 +80,9 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 | `chat` | `Chat` | Mensagem de chat para o destinatário, ou eco para o remetente (com `cid`). |
 | `chatHistory` | `{ messages: Chat[] }` | Ao conectar, sempre (mesmo vazio): últimas ≤ 100 mensagens `everyone`, mais antiga primeiro, sem `cid`. |
 | `chatError` | `{ cid: string, reason: "invalid" \| "empty" \| "too_long" \| "rate_limited" \| "offline" }` | Chat recusado; só para o remetente. |
+| `appearance` | `{ id: string, appearance: Appearance }` | Resposta a todo `appearance` do cliente. Mudou → para todos (inclusive o remetente); sem mudança, fora do catálogo ou acima do limite → só para o remetente, com a aparência atual. |
 
-Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby` → `chatHistory`; só então os outros recebem `joined`. Ordem no fim de um tick: `state` → `zone` → `nearby`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
+Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby` → `chatHistory`; só então os outros recebem `joined`. O `?av=` já vale no `welcome` e no `joined`, sem `appearance` à parte. Ordem no fim de um tick: `state` → `zone` → `nearby`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
 
 ## Proximidade
 
@@ -89,7 +95,7 @@ Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby
 
 ## Zonas
 
-- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião) ou `private` (cabine). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
+- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião) ou `private` (sala privada, ringue). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
 - Quem está numa zona ouve e é ouvido por todos da mesma zona, a qualquer distância, e por ninguém de fora, nem colado na porta. Fora de zonas vale a [Proximidade](#proximidade), só entre quem também está fora.
 - Mudança de zona é imediata no tick em que o jogador cruza a borda: sem histerese, e quem sai de uma zona não herda a histerese da distância (dois que saem juntos a `d² = 25` não ficam no conjunto).
 - O jogador recebe `zone` com a zona em que está ao conectar e a cada mudança; a zona dos outros não vai no protocolo (o cliente deriva das posições e do mapa, ambos públicos — presença por sala não é segredo).
@@ -131,6 +137,19 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 - O JSON do servidor não escapa `<`, `>` e `&` (sai literal, não `\u003c`); o cliente usa `JSON.parse` e nunca injeta o texto como HTML.
 - O servidor nunca loga texto, `to` nem `cid`; só `chat rejected` com o motivo, em debug.
 
+## Aparência
+
+- `Appearance` escolhe uma opção por categoria: `skin` (pele), `hair` (estilo do cabelo), `hairColor`, `shirt`, `pants`, `acc` (acessório; 0 = nenhum). Cada campo é um índice inteiro 0–255 no catálogo `internal/avatar` (fonte única; `web/src/avatar/catalog.gen.ts` é gerado dele). Hoje: 5 peles, 7 estilos (6 = careca, sem cor de cabelo visível), 8 cores de cabelo, 8 camisas, 4 calças, 4 acessórios.
+- O catálogo só cresce no fim: nada é removido nem reordenado, então um índice salvo mantém o significado. O cliente troca índice que não conhece por 0 ao desenhar.
+- Forma compacta (`?av=` e `localStorage`): `"skin.hair.hairColor.shirt.pants.acc"` em decimal, ex. `"2.0.5.1.3.0"`. Campos finais ausentes = 0 (`"2.0"` = `"2.0.0.0.0.0"`); vazia, mais de 6 campos, campo que não é decimal 0–255 ou fora do catálogo → inválida.
+- Padrão (sem escolha nem memória): derivado do `id`, estável e calculado só pelo servidor — FNV-1a 64 do `id` lido como número em base mista, um dígito por campo na ordem acima, sobre pools congelados (`skin` 0–4, `hair` 0–5, `hairColor` 0–6, `shirt` 0–7, `pants` 0–3, `acc` `[0,0,0,1]`). Crescer o catálogo não muda o padrão de ninguém.
+- Ao conectar vale, nesta ordem: `?av=` válido → aparência lembrada da identidade → padrão. A memória é a mesma da última posição (ver [Spawn e reconexão](#spawn-e-reconexão)).
+- C→S `appearance`:
+  - Close 1008 (mensagem inválida): `d` que não é objeto (inclusive `null`) ou campo com tipo errado, negativo, fracionário, em notação exponencial ou > 255. `null` num campo conta como ausente.
+  - Índice fora do catálogo → sem close: só o remetente recebe `appearance` com a atual (log em debug).
+  - Rate limit **por identidade**, 0,2/s com burst 3 (3 seguidas, depois 1 a cada 5 s), compartilhado por todas as conexões da identidade: reconectar não devolve tokens. Só pedido dentro do catálogo gasta token, mesmo igual à atual. Excedeu → sem close: só o remetente recebe `appearance` com a atual. O bucket geral de 20/s, por conexão, conta toda mensagem antes disso.
+  - Válido e diferente da atual → guarda e envia `appearance` a todos, inclusive o remetente. Igual à atual → só o remetente recebe.
+
 ## Regras de movimento (servidor autoritativo)
 
 1. A cada tick, para cada jogador com fila não vazia e cooldown expirado: consome 1 input.
@@ -143,36 +162,17 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 ## Mapa
 
 - Arquivo: `maps/<mapId>.tmj` (Tiled JSON, orthogonal, finito). Servido em `GET /maps/<mapId>.tmj`. Fase 1: `mapId = "office"`.
-- `tilewidth = tileheight = 32`. Tamanho do escritório: 40×25.
+- `tilewidth = tileheight = 32`. Tamanho do escritório: 50×25 (até a fase 6.1, 40×25).
 - Camadas obrigatórias:
   - `floor` (tilelayer)
   - `walls` (tilelayer) — qualquer gid ≠ 0 bloqueia
   - `spawns` (objectgroup) — objetos `point: true`; tile = `floor(x/32), floor(y/32)`
+- Camada opcional `decor` (tilelayer): arte sem colisão (cadeiras, monitores, quadros), desenhada acima de `walls`; o servidor a ignora.
 - Camada opcional `zones` (objectgroup): um retângulo (sem `point`, `ellipse`, `polygon`, `polyline`, `text` ou `gid`; `rotation` 0) por zona, até 255. O `name` nativo do objeto é o nome exibido (1–40 runes, não vazio); propriedades Tiled `string`: `id` (`[a-z0-9-]{1,32}`, único) e `kind` (`meeting` ou `private`). Tile na zona se o centro `(32x+16, 32y+16)` cai em `[x, x+width) × [y, y+height)`. O servidor recusa o mapa no boot se uma zona é inválida, tem `width`/`height` ≤ 0, não cobre nenhum tile, divide tile com outra, ou se um spawn cai numa zona.
-- Tileset embutido no `.tmj`:
-
-```json
-{ "firstgid": 1, "name": "office", "image": "tiles.png",
-  "tilewidth": 32, "tileheight": 32, "columns": 8, "tilecount": 8,
-  "imagewidth": 256, "imageheight": 32 }
-```
-
-- Semântica dos gids (placeholder até tileset Kenney):
-
-| gid | tile | camada típica |
-|---|---|---|
-| 1 | piso claro | floor |
-| 2 | carpete (salas) | floor |
-| 3 | parede | walls |
-| 4 | mesa | walls |
-| 5 | planta | walls |
-| 6 | sofá | walls |
-| 7 | piso de madeira (copa) | floor |
-| 8 | quadro/tela | walls |
-
-- O frontend gera a textura `tiles.png` em runtime (placeholder colorido); servidor nunca lê a imagem.
+- Camada opcional `areas` (objectgroup): retângulos com nome e propriedade `id`, como os de `zones` mas sem `kind`, que nomeiam partes do piso aberto (`copa`, `escritorio`) para as listas do cliente; o servidor a ignora e ela não muda áudio nem chat.
+- Tileset embutido no `.tmj` (`name: "office"`), atlas `web/public/game/office-tiles.png` de tiles 32 px com 1 px de borda repetida (`margin: 1`, `spacing: 2`, 16 colunas). Mapa e atlas são gerados por `tools/officeart` (`make art`) a partir de uma planta ASCII; o gid só indexa a arte, a colisão é apenas `walls` ≠ 0. O servidor nunca lê a imagem.
 
 ## Spawn e reconexão
 
-- Identidade com última posição conhecida (memória do processo) → volta para ela. A memória guarda no máximo 1000 identidades ausentes; acima disso esquece a que saiu há mais tempo. Ao reentrar, a entrada é consumida.
+- Identidade com última posição conhecida (memória do processo) → volta para ela, com a mesma direção e aparência. A memória guarda no máximo 1000 identidades ausentes; acima disso esquece a que saiu há mais tempo (posição e aparência juntas). Ao reentrar, a entrada é consumida. Reconexão que derruba a sessão anterior mantém posição e aparência (salvo `?av=` válido).
 - Senão → spawn point em ordem, ciclando.

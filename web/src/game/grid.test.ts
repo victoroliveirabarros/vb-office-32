@@ -7,6 +7,7 @@ const tiled = {
   layers: [
     { name: 'floor', type: 'tilelayer', data: [1, 1, 1, 1, 1, 1] },
     { name: 'walls', type: 'tilelayer', data: [0, 3, 0, 0, 0, 0] },
+    { name: 'decor', type: 'tilelayer', data: [7, 7, 0, 7, 0, 0] },
     { name: 'spawns', type: 'objectgroup', objects: [] },
   ],
 }
@@ -17,6 +18,11 @@ describe('Grid', () => {
   it('blocks tiles with a non-zero walls gid', () => {
     expect(grid.isBlocked(1, 0)).toBe(true)
     expect(grid.isBlocked(0, 0)).toBe(false)
+  })
+
+  it('ignores the decor layer', () => {
+    expect(grid.isBlocked(0, 0)).toBe(false)
+    expect(grid.isBlocked(0, 1)).toBe(false)
   })
 
   it('blocks outside the map', () => {

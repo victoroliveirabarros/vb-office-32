@@ -6,11 +6,12 @@ GO      ?= go
 BIN     := bin
 LOADBOT_FLAGS ?= -n 50 -duration 20s
 DEVIDP_FLAGS  ?=
+ART_FLAGS     ?=
 LIVEKIT_IMAGE ?= livekit/livekit-server:v1.13
 # Where LiveKit posts its webhooks: the server started by make run.
 LIVEKIT_WEBHOOK ?= http://127.0.0.1:8080/livekit/webhook
 
-.PHONY: run test vet lint build loadbot web-dev web-build devidp dev-oidc livekit
+.PHONY: run test vet lint build loadbot web-dev web-build devidp dev-oidc livekit art
 
 run:
 	$(GO) run ./cmd/vb-office-32
@@ -53,6 +54,13 @@ dev-oidc:
 	@test "$$VB_OFFICE32_AUTH" = oidc && test -n "$$VB_OFFICE32_SESSION_KEY" || \
 		{ echo "dev-oidc: .env needs the OIDC block of .env.example with VB_OFFICE32_SESSION_KEY set"; exit 1; }
 	$(MAKE) -j$(words $(DEV_OIDC)) $(DEV_OIDC)
+
+# Rebuilds maps/office.tmj and web/public/game/office-tiles.png from art/
+# and tools/officeart/office.txt, and web/public/game/avatar-parts.png and
+# web/src/avatar/*.gen.* from art/custom/avatar and internal/avatar;
+# ART_FLAGS="-sheet DIR" also writes review sheets.
+art:
+	$(GO) run ./tools/officeart $(ART_FLAGS)
 
 web-dev:
 	cd web && npm run dev

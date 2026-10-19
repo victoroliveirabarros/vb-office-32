@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
@@ -158,7 +159,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 	ana := dial(t, url, "Ana")
 	w := expect[welcomeMsg](ana, typeWelcome, nil)
-	wantAna := playerMsg{ID: "guest:ana", Name: "Ana", X: 0, Y: 0, Dir: world.Down}
+	wantAna := playerMsg{ID: "guest:ana", Name: "Ana", X: 0, Y: 0, Dir: world.Down, Appearance: avatar.Default("guest:ana")}
 	if w.SelfID != "guest:ana" || w.MapID != "small" || w.TickRate != 20 || w.StepMs != 150 {
 		t.Errorf("welcome = %+v", w)
 	}
@@ -172,7 +173,7 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Errorf("bob welcome players = %+v, want 2", w.Players)
 	}
 	joined := expect[playerMsg](ana, typeJoined, nil)
-	if want := (playerMsg{ID: "guest:bob", Name: "bob", X: 0, Y: 1, Dir: world.Down}); joined != want {
+	if want := (playerMsg{ID: "guest:bob", Name: "bob", X: 0, Y: 1, Dir: world.Down, Appearance: avatar.Default("guest:bob")}); joined != want {
 		t.Errorf("joined = %+v, want %+v", joined, want)
 	}
 
@@ -212,7 +213,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 	ana = dial(t, url, "Ana")
 	w = expect[welcomeMsg](ana, typeWelcome, nil)
-	wantAna = playerMsg{ID: "guest:ana", Name: "Ana", X: 1, Y: 0, Dir: world.Right}
+	wantAna = playerMsg{ID: "guest:ana", Name: "Ana", X: 1, Y: 0, Dir: world.Right, Appearance: avatar.Default("guest:ana")}
 	if !slices.Contains(w.Players, wantAna) {
 		t.Errorf("welcome players = %+v, want %+v", w.Players, wantAna)
 	}
@@ -449,7 +450,7 @@ func TestOIDCWithoutCookieRejectedBeforeUpgrade(t *testing.T) {
 }
 
 func TestSlowConsumerIsClosed(t *testing.T) {
-	s := newSession(auth.Identity{ID: "guest:x", Name: "x"}, nil, nil, nil, slog.New(slog.DiscardHandler))
+	s := newSession(auth.Identity{ID: "guest:x", Name: "x"}, nil, nil, sessionLimits{}, slog.New(slog.DiscardHandler))
 	for range sendBuffer {
 		s.send([]byte("{}"))
 	}

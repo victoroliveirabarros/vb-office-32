@@ -1,0 +1,32 @@
+# Two monitors side by side (64x16): seen from the front with keyboard
+# and mouse (2 tiles, south row of a desk), then from behind (2 tiles,
+# north row). CC0 1.0, vb-office-32.
+. transparent
+k 2b2b2b
+c 9fd4f7
+b 3d7fc4
+B 2a5d99
+w d6e9fa
+y fdc339
+g 5c5c5c
+l a8a8a8
+M f2f2f2
+h 5e5e5e
+L 4f4f4f
+
+................................................................
+.kkkkkkkkkkkkkk..kkkkkkkkkkkkkk.................................
+.kcbbbbbbbbbbbk..kbbbbbbbbbbbck..kkkkkkkkkkkkkk..kkkkkkkkkkkkkk.
+.kbwwwwbbyybbbk..kbwwbbwwwwwbbk..khhhhhhhhhhhhk..khhhhhhhhhhhhk.
+.kbbbbbbbbbbbbk..kbbbbbbbbbbbbk..kLLLLLLLLLLLLk..kLLLLLLLLLLLLk.
+.kbwwwbbwwwwbbk..kbwwwwwbbwwbbk..kLLLLLggLLLLLk..kLLLLLggLLLLLk.
+.kBBBBBBBBBBBBk..kBBBBBBBBBBBBk..kLLLLLLLLLLLLk..kLLLLLLLLLLLLk.
+.kkkkkkkkkkkkkk..kkkkkkkkkkkkkk..kllllllllllllk..kllllllllllllk.
+......kggk............kggk.......kkkkkkkkkkkkkk..kkkkkkkkkkkkkk.
+........kkkkkkkkkkkkkkkk..kk..........kggk............kggk......
+........kwlwlwlwlwlwlwlk.kMMk........kkkkkk..........kkkkkk.....
+........kkkkkkkkkkkkkkkk..kk....................................
+................................................................
+................................................................
+................................................................
+................................................................

@@ -8,6 +8,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/auth"
+	"github.com/victoroliveirabarros/vb-office-32/internal/avatar"
 )
 
 // DefaultSpace is the only space in phase 1.
@@ -22,7 +23,7 @@ type Handler struct {
 	auth           Authenticator
 	originPatterns []string
 	slots          chan struct{}
-	chats          *chatLimits
+	limits         sessionLimits
 	log            *slog.Logger
 }
 
@@ -34,7 +35,7 @@ func NewHandler(hub *Hub, authn Authenticator, originPatterns []string, maxSessi
 		auth:           authn,
 		originPatterns: originPatterns,
 		slots:          make(chan struct{}, maxSessions),
-		chats:          newChatLimits(),
+		limits:         newSessionLimits(),
 		log:            log,
 	}
 }
@@ -72,11 +73,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// library limit would close with 1009.
 	conn.SetReadLimit(-1)
 
-	s := newSession(id, conn, room, h.chats, h.log.With("session", id.ID))
+	s := newSession(id, conn, room, h.limits, h.log.With("session", id.ID))
+	s.look = h.look(r, id.ID)
 	if err := room.join(r.Context(), s); err != nil {
 		conn.Close(websocket.StatusGoingAway, reasonRestarting)
 		return
 	}
 	s.run(r.Context())
 	room.leave(s)
+}
+
+// look reads the appearance in ?av=, in compact form. An invalid one is
+// ignored, never refused: the player keeps the remembered or default look.
+func (h *Handler) look(r *http.Request, id string) *avatar.Appearance {
+	v := r.URL.Query().Get("av")
+	if v == "" {
+		return nil
+	}
+	a, err := avatar.Parse(v)
+	if err != nil {
+		h.log.Debug("invalid av ignored", "session", id, "len", len(v))
+		return nil
+	}
+	return &a
 }

@@ -1,0 +1,29 @@
+# Monitor seen from the front with its keyboard and mouse, on the south row
+# of an office desk (16x16). CC0 1.0, vb-office-32.
+. transparent
+k 2b2b2b
+c 41b4da
+b 2e8d89
+B 1f6360
+g 5c5c5c
+w e3e3e3
+l a8a8a8
+M f2f2f2
+m c4c4c4
+
+................
+..kkkkkkkkkkkk..
+..kccbbbbbbbbk..
+..kcbbbbbbbbbk..
+..kbbbbbbbbbbk..
+..kBBBBBBBBBBk..
+..kkkkkkkkkkkk..
+......kggk......
+..kkkkkkkkkk.kk.
+..kwlwlwlwlkkMMk
+..kkkkkkkkkkkmmk
+.............kk.
+................
+................
+................
+................

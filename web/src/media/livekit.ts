@@ -12,6 +12,7 @@ import {
 import type { LocalTrack, Participant, RemoteTrack, RemoteTrackPublication, ScreenShareCaptureOptions, TrackPublishOptions } from 'livekit-client'
 import { DeviceFailure } from './client'
 import type { DeviceError, MediaRoom, RoomListener } from './client'
+import type { Devices } from './devices'
 import type { DisconnectKind } from './reconnect'
 import type { Publication, TrackSource } from './subscriptions'
 
@@ -32,7 +33,9 @@ export const screenPublish: TrackPublishOptions = { screenShareEncoding: ScreenS
 // publisher allows us once the server puts us in its nearby set.
 const NOT_ALLOWED_DEBUG_MS = 3_000
 
-export function createLiveKitRoom(listener: RoomListener): MediaRoom {
+// Saved devices are a preference, not a must: one that is gone falls back
+// to the browser's default.
+export function createLiveKitRoom(listener: RoomListener, devices: Devices = {}): MediaRoom {
   // The SDK only simulcasts captures at least 480 px wide, so the camera
   // opens at 360p with its top layer capped at the 180p bitrate; tiles pull
   // the 90p layer and dynacast pauses the top one while nobody wants it.
@@ -50,7 +53,9 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
       dtx: true,
       red: true,
     },
-    videoCaptureDefaults: { resolution: VideoPresets.h360.resolution },
+    videoCaptureDefaults: { resolution: VideoPresets.h360.resolution, ...(devices.videoinput ? { deviceId: devices.videoinput } : {}) },
+    ...(devices.audioinput ? { audioCaptureDefaults: { deviceId: devices.audioinput } } : {}),
+    ...(devices.audiooutput ? { audioOutput: { deviceId: devices.audiooutput } } : {}),
   })
   // Nobody receives our tracks until the client says who is near; the SDK
   // sends this on connect, before anything is published.
@@ -177,6 +182,14 @@ export function createLiveKitRoom(listener: RoomListener): MediaRoom {
     },
     screenShared: () => capturing(room.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track) || capturing(screen),
     startAudio: () => room.startAudio(),
+    async switchDevice(kind, id) {
+      try {
+        await room.switchActiveDevice(kind, id)
+      } catch (err) {
+        throw new DeviceFailure(deviceError(err))
+      }
+    },
+    activeDevice: (kind) => room.getActiveDevice(kind),
   }
 }
 

@@ -1,0 +1,26 @@
+# Office chair: s faces south, n north, e east, w west (64x16). CC0 1.0, vb-office-32.
+. transparent
+K 26292e
+h 646b75
+m 4a5059
+d 383d44
+a 4f7479
+S 9aa1aa
+w 1a1c1f
+
+................................................................
+.....KKKKKK.........KKKKKKKK.......KK......................KK...
+....KhhhhhhK........KhhhhhhK......KhmK....................KmhK..
+....KmmmmmmK......KKKmmmmmmKKK....KhmK....................KmhK..
+....KmaaaamK......KhKmmmmmmKhK....KhaK....................KahK..
+....KmmmmmmK......KmKmmmmmmKmK....KhaK....................KahK..
+....KddddddK......KmKmmmmmmKmK....KhmK....................KmhK..
+..KKKKKKKKKKKK....KKKddddddKKK....KhmKKKKKK..........KKKKKKmhK..
+..KhKhhhhhhKhK......KddddddK......KhmKdddddK........KdddddKmhK..
+..KmKmmmmmmKmK......KKKKKKKK......KhmKKKKdKK........KKdKKKKmhK..
+..KmKmmmmmmKmK........KSSK........KKKKKKKKKKKK....KKKKKKKKKKKK..
+..KKKddddddKKK....KSSSSSSSSSSK....KhhhhhhhhhhhK..KhhhhhhhhhhhK..
+....KKKKKKKK......KwK..KwK..KwK...KmmmmmmmmmmmK..KmmmmmmmmmmmK..
+......KSSK.........................KKKKKSSKKKK....KKKKSSKKKKK...
+..KSSSSSSSSSSK.....................KSSSSSSSSSK....KSSSSSSSSSK...
+..KwK..KwK..KwK...................KwK...KwK..KwKKwK..KwK...KwK..

@@ -42,6 +42,7 @@ export function createMediaView(): BoundMediaView {
   const micButton = requireElement('media-mic', HTMLButtonElement)
   const cameraButton = requireElement('media-camera', HTMLButtonElement)
   const screenButtonEl = requireElement('media-screen', HTMLButtonElement)
+  const screenText = requireElement('media-screen-text', HTMLSpanElement)
   const unlockButton = requireElement('media-unlock', HTMLButtonElement)
   const note = requireElement('media-note', HTMLSpanElement)
   const tiles = requireElement('media-tiles', HTMLDivElement)
@@ -65,7 +66,8 @@ export function createMediaView(): BoundMediaView {
     const share = screenButton(screen, link)
     screenButtonEl.hidden = share.hidden
     screenButtonEl.disabled = share.disabled
-    screenButtonEl.textContent = share.text
+    screenButtonEl.classList.toggle('busy', screen.busy)
+    screenText.textContent = share.text
     screenButtonEl.title = share.title
     screenButtonEl.setAttribute('aria-pressed', String(screen.on))
     note.textContent =
@@ -189,6 +191,7 @@ function renderButton(button: HTMLButtonElement, state: DeviceState, stopped: bo
   const view = deviceButton(state, stopped, device)
   button.setAttribute('aria-pressed', String(view.pressed))
   button.classList.toggle('error', view.error)
+  button.classList.toggle('busy', state.busy)
   button.disabled = view.disabled
   button.title = view.label
   button.setAttribute('aria-label', view.label)

@@ -51,7 +51,7 @@ func TestLiveKitReconcile(t *testing.T) {
 		<-done
 	}()
 
-	ana := newSession(auth.Identity{ID: "guest:ana", Name: "Ana"}, nil, room, nil, log)
+	ana := newSession(auth.Identity{ID: "guest:ana", Name: "Ana"}, nil, room, sessionLimits{}, log)
 	if err := room.join(ctx, ana); err != nil {
 		t.Fatal(err)
 	}

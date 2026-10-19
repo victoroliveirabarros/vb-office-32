@@ -1,8 +1,11 @@
+import { fromWire } from '../avatar/appearance'
+import type { Appearance } from '../avatar/appearance'
 import { isInt, isNumber, isRecord, isString } from '../guards'
 
 export type Dir = 'up' | 'down' | 'left' | 'right'
 
-export type Player = { id: string; name: string; x: number; y: number; dir: Dir }
+/** appearance is absent only from an older server; the client shows the first look. */
+export type Player = { id: string; name: string; x: number; y: number; dir: Dir; appearance?: Appearance }
 export type Pos = { id: string; x: number; y: number; dir: Dir }
 
 export type MoveInput = { seq: number; dir: Dir }
@@ -18,6 +21,7 @@ export type ClientMessage =
   | { t: 'move'; d: MoveInput }
   | { t: 'ping'; d: { ts: number } }
   | { t: 'chat'; d: ChatSend }
+  | { t: 'appearance'; d: Appearance }
 
 export type Welcome = {
   selfId: string
@@ -54,6 +58,8 @@ export type Chat = {
 
 export type ChatError = { cid: string; reason: ChatErrorReason }
 
+export type AppearanceChange = { id: string; appearance: Appearance }
+
 export type ServerMessage =
   | { t: 'welcome'; d: Welcome }
   | { t: 'joined'; d: Player }
@@ -66,6 +72,7 @@ export type ServerMessage =
   | { t: 'chat'; d: Chat }
   | { t: 'chatHistory'; d: { messages: Chat[] } }
   | { t: 'chatError'; d: ChatError }
+  | { t: 'appearance'; d: AppearanceChange }
 
 export const CLOSE_REPLACED = 4001
 export const CLOSE_EXPIRED = 4002
@@ -94,9 +101,11 @@ export function parseServerMessage(raw: string): ServerMessage | null {
 
   switch (value.t) {
     case 'welcome':
-      return isWelcome(d) ? { t: 'welcome', d } : null
-    case 'joined':
-      return isPlayer(d) ? { t: 'joined', d } : null
+      return toWelcome(d)
+    case 'joined': {
+      const player = toPlayer(d)
+      return player ? { t: 'joined', d: player } : null
+    }
     case 'left':
       return isString(d.id) ? { t: 'left', d: { id: d.id } } : null
     case 'state':
@@ -119,6 +128,10 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return Array.isArray(d.messages) ? { t: 'chatHistory', d: { messages: d.messages.flatMap((m) => toChat(m) ?? []) } } : null
     case 'chatError':
       return isString(d.cid) && isString(d.reason) ? { t: 'chatError', d: { cid: d.cid, reason: errorReason(d.reason) } } : null
+    case 'appearance': {
+      const appearance = fromWire(d.appearance)
+      return isString(d.id) && appearance ? { t: 'appearance', d: { id: d.id, appearance } } : null
+    }
     default:
       return null
   }
@@ -132,19 +145,28 @@ function isPos(v: unknown): v is Pos {
   return isRecord(v) && isString(v.id) && isInt(v.x) && isInt(v.y) && isDir(v.dir)
 }
 
-function isPlayer(v: unknown): v is Player {
-  return isRecord(v) && isString(v.name) && isPos(v)
+// A malformed appearance costs only the look, not the player.
+function toPlayer(v: unknown): Player | null {
+  if (!isRecord(v) || !isPos(v)) return null
+  const { name, appearance: look } = v as Record<string, unknown>
+  if (!isString(name)) return null
+  const player: Player = { id: v.id, name, x: v.x, y: v.y, dir: v.dir }
+  const appearance = look == null ? null : fromWire(look)
+  if (appearance) player.appearance = appearance
+  return player
 }
 
-function isWelcome(d: Record<string, unknown>): d is Welcome {
-  return (
-    isString(d.selfId) &&
-    isString(d.mapId) &&
-    isNumber(d.tickRate) &&
-    isNumber(d.stepMs) &&
-    Array.isArray(d.players) &&
-    d.players.every(isPlayer)
-  )
+function toWelcome(d: Record<string, unknown>): ServerMessage | null {
+  if (!isString(d.selfId) || !isString(d.mapId) || !isNumber(d.tickRate) || !isNumber(d.stepMs) || !Array.isArray(d.players)) {
+    return null
+  }
+  const players: Player[] = []
+  for (const p of d.players) {
+    const player = toPlayer(p)
+    if (!player) return null
+    players.push(player)
+  }
+  return { t: 'welcome', d: { selfId: d.selfId, mapId: d.mapId, tickRate: d.tickRate, stepMs: d.stepMs, players } }
 }
 
 function isState(d: Record<string, unknown>): d is State {
