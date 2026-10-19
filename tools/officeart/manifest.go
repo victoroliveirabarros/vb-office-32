@@ -23,6 +23,8 @@ func nine(prefix string, src func(col, row int) Source, col, row int) []Entry {
 
 func ring(col, row int) Source { return custom("ring", col, row) }
 
+func desk(col, row int) Source { return custom("office-desk", col, row) }
+
 var manifest = concat(
 	[]Entry{
 		{"outside", custom("outside", 0, 0)},
@@ -53,15 +55,24 @@ var manifest = concat(
 		{"table-w", indoor(0, 1)},
 		{"table", indoor(1, 1)},
 		{"table-e", indoor(2, 1)},
-		{"desk-w", indoor(4, 4)},
-		{"desk", indoor(5, 4)},
-		{"desk-e", indoor(6, 4)},
-		{"chair-s", indoor(0, 2)},
-		{"chair-n", indoor(1, 2)},
-		{"chair-e", indoor(2, 2)},
-		{"chair-w", indoor(3, 2)},
+		{"wood-chair-s", indoor(0, 2)},
+		{"wood-chair-n", indoor(1, 2)},
+		{"chair-s", custom("office-chair", 0, 0)},
+		{"chair-n", custom("office-chair", 1, 0)},
+		{"chair-e", custom("office-chair", 2, 0)},
+		{"chair-w", custom("office-chair", 3, 0)},
+		{"desk-nw", desk(0, 0)},
+		{"desk-n", desk(1, 0)},
+		{"desk-ne", desk(2, 0)},
+		{"desk-sw", desk(0, 1)},
+		{"desk-s", desk(1, 1)},
+		{"desk-se", desk(2, 1)},
 		{"monitor-front", custom("monitor-front", 0, 0)},
 		{"monitor-back", custom("monitor-back", 0, 0)},
+		{"desk-papers", custom("desk-items", 0, 0)},
+		{"desk-books", custom("desk-items", 1, 0)},
+		{"desk-lamp", custom("desk-items", 2, 0)},
+		{"desk-plant", custom("desk-items", 3, 0)},
 		{"tv-w", custom("tv", 0, 0)},
 		{"tv-e", custom("tv", 1, 0)},
 

@@ -20,13 +20,15 @@ type grid [mapH]string
 //
 // floor: , floor  w wood  t teal, o orange, y beige and g grey carpets
 // b boxing ring canvas, inside a grey carpet.
-// solid (blocks movement): . free  # wall  T table  D desk  K counter
+// solid (blocks movement): . free  # wall  T table  D office desk, two
+// rows deep with a divider between them  K counter
 // W sink  F stove  G fridge  P plant  S sofa (2 wide)  A armchair
 // E bookshelf  V TV (2 wide)  R ring post, on a corner of the canvas
 // B punching bag  N bench (2 wide).
-// decor (no collision): . nothing  c chair, facing the table or desk next
-// to it  m monitor on a desk, facing the chair next to it  p plant on a
-// desk  a armchair
+// decor (no collision): . nothing  c office chair and h wooden chair,
+// facing the table or desk next to it  m monitor with keyboard on a desk,
+// facing the chair next to it  n papers and mug, b books, l lamp and
+// p plant on a desk  a armchair
 // r runner, on free tiles; o ring ropes, on an edge of the canvas;
 // j window  q picture  Q panel (2 wide)  e shelf, on wall fronts.
 type Plan struct {
@@ -234,7 +236,14 @@ func (p *Plan) solidTile(x, y int) (string, error) {
 	case 'T':
 		return run(&p.Solid, x, y, "table", 0)
 	case 'D':
-		return run(&p.Solid, x, y, "desk", 0)
+		part, err := nineSlice(&p.Solid, x, y, "desk", 'D')
+		if err != nil {
+			return "", err
+		}
+		if !strings.HasPrefix(part, "desk-n") && !strings.HasPrefix(part, "desk-s") {
+			return "", errAt(x, y, "desk must be two rows deep")
+		}
+		return part, nil
 	case 'E':
 		return run(&p.Solid, x, y, "shelf", 0)
 	case 'S':
@@ -316,21 +325,23 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 	switch {
 	case c == '.':
 		return "", nil
-	case strings.IndexByte("caro", c) >= 0 && s != '.':
+	case strings.IndexByte("charo", c) >= 0 && s != '.':
 		return "", errAt(x, y, "%q must be on a free tile", c)
 	case strings.IndexByte("jqQe", c) >= 0 && !p.front(x, y):
 		return "", errAt(x, y, "%q must be on a wall front", c)
 	}
 	switch c {
 	case 'c':
-		return p.chairTile(x, y)
+		return p.chairTile(x, y, "chair")
+	case 'h':
+		return p.chairTile(x, y, "wood-chair")
 	case 'm':
 		return p.monitorTile(x, y)
-	case 'p':
+	case 'n', 'b', 'l', 'p':
 		if s != 'D' {
-			return "", errAt(x, y, "desk plant must be on a desk")
+			return "", errAt(x, y, "%q must be on a desk", c)
 		}
-		return plants[(x+y)%2], nil
+		return deskItems[c], nil
 	case 'a':
 		return "armchair", nil
 	case 'r':
@@ -355,15 +366,17 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 	return "", errAt(x, y, "unknown decor %q", c)
 }
 
+var deskItems = map[byte]string{'n': "desk-papers", 'b': "desk-books", 'l': "desk-lamp", 'p': "desk-plant"}
+
 // chairTile turns a chair towards the table or desk next to it, preferring
 // one to the south or north.
-func (p *Plan) chairTile(x, y int) (string, error) {
+func (p *Plan) chairTile(x, y int, prefix string) (string, error) {
 	for _, d := range []struct {
 		dx, dy int
 		dir    string
 	}{{0, 1, "s"}, {0, -1, "n"}, {1, 0, "e"}, {-1, 0, "w"}} {
 		if c := p.Solid.at(x+d.dx, y+d.dy); c == 'T' || c == 'D' {
-			return "chair-" + d.dir, nil
+			return prefix + "-" + d.dir, nil
 		}
 	}
 	return "", errAt(x, y, "chair without a table or desk next to it")
