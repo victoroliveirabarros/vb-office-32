@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
+	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
@@ -20,6 +21,7 @@ const (
 	typePong    = "pong"
 	typeMedia   = "media"
 	typeNearby  = "nearby"
+	typeZone    = "zone"
 
 	typeChat        = "chat"
 	typeChatHistory = "chatHistory"
@@ -130,6 +132,13 @@ type mediaMsg struct {
 
 type nearbyMsg struct {
 	IDs []string `json:"ids"`
+}
+
+// zoneMsg is the recipient's zone; outside every zone only ID is sent, empty.
+type zoneMsg struct {
+	ID   string       `json:"id"`
+	Name string       `json:"name,omitempty"`
+	Kind tilemap.Kind `json:"kind,omitempty"`
 }
 
 // chatOut is a chat as clients receive it: At is unix milliseconds, To is

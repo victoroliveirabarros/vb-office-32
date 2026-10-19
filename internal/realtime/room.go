@@ -229,6 +229,7 @@ func (r *Room) handleJoin(s *Session) {
 	if r.media != nil {
 		r.sendMedia(m, time.Now())
 	}
+	r.sendZone(s)
 	r.sendNearby(s, r.space.Nearby(s.id))
 	r.sendHistory(s)
 	r.log.Info("player joined", "id", s.id, "replaced", replaced)
@@ -368,6 +369,11 @@ func (r *Room) tick(now time.Time) {
 	if len(d.Moved) > 0 || len(d.Acks) > 0 {
 		r.sendState(d)
 	}
+	for id := range d.Zones {
+		if m, ok := r.members[id]; ok {
+			r.sendZone(m.sess)
+		}
+	}
 	for id, ids := range d.Nearby {
 		if m, ok := r.members[id]; ok {
 			r.sendNearby(m.sess, ids)
@@ -425,6 +431,19 @@ func (r *Room) sendNearby(s *Session, ids []string) {
 	msg, err := encode(typeNearby, nearbyMsg{IDs: ids})
 	if err != nil {
 		r.log.Error("encode nearby", "err", err)
+		return
+	}
+	s.send(msg)
+}
+
+func (r *Room) sendZone(s *Session) {
+	var zm zoneMsg
+	if z, ok := r.space.Zone(s.id); ok {
+		zm = zoneMsg{ID: z.ID, Name: z.Name, Kind: z.Kind}
+	}
+	msg, err := encode(typeZone, zm)
+	if err != nil {
+		r.log.Error("encode zone", "err", err)
 		return
 	}
 	s.send(msg)

@@ -401,8 +401,8 @@ func TestChatJoinOrder(t *testing.T) {
 		media func() Media
 		want  []string
 	}{
-		{"without media", func() Media { return nil }, []string{typeWelcome, typeNearby, typeChatHistory}},
-		{"with media", func() Media { return &fakeIssuer{ttl: time.Hour} }, []string{typeWelcome, typeMedia, typeNearby, typeChatHistory}},
+		{"without media", func() Media { return nil }, []string{typeWelcome, typeZone, typeNearby, typeChatHistory}},
+		{"with media", func() Media { return &fakeIssuer{ttl: time.Hour} }, []string{typeWelcome, typeMedia, typeZone, typeNearby, typeChatHistory}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -454,10 +454,10 @@ func TestChatHistory(t *testing.T) {
 			for len(s.out) > 0 {
 				envs = append(envs, received(t, s))
 			}
-			if len(envs) != 3 || envs[2].T != typeChatHistory {
-				t.Fatalf("join got %d messages, want chatHistory third", len(envs))
+			if len(envs) != 4 || envs[3].T != typeChatHistory {
+				t.Fatalf("join got %d messages, want chatHistory fourth", len(envs))
 			}
-			return decode[chatHistoryMsg](t, envs[2]).Messages
+			return decode[chatHistoryMsg](t, envs[3]).Messages
 		}
 		ms := history("Bob")
 		if len(ms) != chat.HistorySize {

@@ -1,0 +1,21 @@
+{
+  "orientation": "orthogonal",
+  "infinite": false,
+  "width": 12,
+  "height": 1,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "layers": [
+    { "name": "floor", "type": "tilelayer", "width": 12, "height": 1, "data": [2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1] },
+    { "name": "walls", "type": "tilelayer", "width": 12, "height": 1, "data": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { "name": "spawns", "type": "objectgroup", "objects": [
+      { "point": true, "x": 176, "y": 16 },
+      { "point": true, "x": 208, "y": 16 },
+      { "point": true, "x": 240, "y": 16 }
+    ] },
+    { "name": "zones", "type": "objectgroup", "objects": [
+      { "id": 4, "name": "Sala 1", "x": 0, "y": 0, "width": 160, "height": 32, "rotation": 0,
+        "properties": [{ "name": "id", "type": "string", "value": "sala-1" }, { "name": "kind", "type": "string", "value": "meeting" }] }
+    ] }
+  ]
+}

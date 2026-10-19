@@ -128,14 +128,19 @@ func TestMediaAndNearby(t *testing.T) {
 		t.Errorf("expiresAt = %v, want about an hour from now", exp)
 	}
 	env, err := ana.read()
+	if err != nil || env.T != typeZone || string(env.D) != `{"id":""}` {
+		t.Fatalf("third message = %s %s (%v), want no zone", env.T, env.D, err)
+	}
+	env, err = ana.read()
 	if err != nil || env.T != typeNearby || string(env.D) != `{"ids":[]}` {
-		t.Fatalf("third message = %s %s (%v), want empty nearby", env.T, env.D, err)
+		t.Fatalf("fourth message = %s %s (%v), want empty nearby", env.T, env.D, err)
 	}
 	next[chatHistoryMsg](ana, typeChatHistory)
 
 	bob := dial(t, url, "bob")
 	next[welcomeMsg](bob, typeWelcome)
 	next[mediaMsg](bob, typeMedia)
+	next[zoneMsg](bob, typeZone)
 	if n := next[nearbyMsg](bob, typeNearby); len(n.IDs) != 0 {
 		t.Errorf("bob's first nearby = %v, want empty until the next tick", n.IDs)
 	}
@@ -150,6 +155,7 @@ func TestMediaAndNearby(t *testing.T) {
 	if m := next[mediaMsg](again, typeMedia); m.Token != "guest:ana|Ana|office|3" {
 		t.Errorf("media after replace = %+v", m)
 	}
+	next[zoneMsg](again, typeZone)
 	if n := next[nearbyMsg](again, typeNearby); !slices.Equal(n.IDs, []string{"guest:bob"}) {
 		t.Errorf("nearby after replace = %v, want [guest:bob]", n.IDs)
 	}
@@ -190,7 +196,7 @@ func TestMediaRenewal(t *testing.T) {
 		synctest.Wait()
 		start := time.Now()
 		var first mediaMsg
-		for _, typ := range []string{typeWelcome, typeMedia, typeNearby, typeChatHistory} {
+		for _, typ := range []string{typeWelcome, typeMedia, typeZone, typeNearby, typeChatHistory} {
 			env := received(t, s)
 			if env.T != typ {
 				t.Fatalf("got %s, want %s", env.T, typ)
@@ -249,6 +255,9 @@ func TestNoMediaWithoutIssuer(t *testing.T) {
 	url := startServer(t)
 	ana := dial(t, url, "Ana")
 	next[welcomeMsg](ana, typeWelcome)
+	if z := next[zoneMsg](ana, typeZone); z != (zoneMsg{}) {
+		t.Errorf("zone = %+v, want none", z)
+	}
 	if n := next[nearbyMsg](ana, typeNearby); n.IDs == nil || len(n.IDs) != 0 {
 		t.Errorf("first nearby = %#v, want empty", n.IDs)
 	}
@@ -483,7 +492,7 @@ func TestMediaReissuedAfterRemovalRace(t *testing.T) {
 
 		ana := joinAs(t, room, "Ana")
 		synctest.Wait()
-		if got := drain(t, ana); !slices.Equal(got, []string{typeWelcome, typeMedia, typeNearby, typeChatHistory}) {
+		if got := drain(t, ana); !slices.Equal(got, []string{typeWelcome, typeMedia, typeZone, typeNearby, typeChatHistory}) {
 			t.Fatalf("messages on rejoin = %v", got)
 		}
 		if got := mi.removals(); len(got) != 0 {
