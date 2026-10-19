@@ -91,6 +91,9 @@ func loadArt(root string) (*art, error) {
 			return nil, err
 		}
 		img, err := parseSprite(b)
+		if err == nil {
+			err = tileSized(img)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
@@ -158,6 +161,14 @@ func (a *art) unusedPaint() error {
 	return errors.Join(errs...)
 }
 
+// tileSized fails unless a map sprite's size is a multiple of the tile.
+func tileSized(img image.Image) error {
+	if b := img.Bounds(); b.Dx()%srcTile != 0 || b.Dy()%srcTile != 0 {
+		return fmt.Errorf("size %dx%d is not a multiple of %d", b.Dx(), b.Dy(), srcTile)
+	}
+	return nil
+}
+
 func readPNG(path string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -213,8 +224,9 @@ func (a *art) buildAtlas(tiles []Entry) (*image.NRGBA, error) {
 }
 
 // parseSprite reads a sprite drawn as text: palette lines "<char> <rrggbb>",
-// "<char> <rrggbbaa>" for a see-through color or "<char> transparent", a blank line, then one line per pixel row. Lines
-// starting with # are comments. Its size must be a multiple of 16.
+// "<char> <rrggbbaa>" for a see-through color or "<char> transparent", a
+// blank line, then one line per pixel row. Lines starting with # are
+// comments.
 func parseSprite(b []byte) (image.Image, error) {
 	palette := make(map[byte]color.NRGBA)
 	var rows []string
@@ -247,8 +259,8 @@ func parseSprite(b []byte) (image.Image, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 || len(rows)%srcTile != 0 || len(rows[0])%srcTile != 0 {
-		return nil, fmt.Errorf("size must be a multiple of %d", srcTile)
+	if len(rows) == 0 {
+		return nil, errors.New("no pixel rows")
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, len(rows[0]), len(rows)))
 	for y, row := range rows {

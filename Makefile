@@ -56,8 +56,9 @@ dev-oidc:
 	$(MAKE) -j$(words $(DEV_OIDC)) $(DEV_OIDC)
 
 # Rebuilds maps/office.tmj and web/public/game/office-tiles.png from art/
-# and tools/officeart/office.txt; ART_FLAGS="-sheet DIR" also writes review
-# sheets.
+# and tools/officeart/office.txt, and web/public/game/avatar-parts.png and
+# web/src/avatar/*.gen.* from art/custom/avatar and internal/avatar;
+# ART_FLAGS="-sheet DIR" also writes review sheets.
 art:
 	$(GO) run ./tools/officeart $(ART_FLAGS)
 

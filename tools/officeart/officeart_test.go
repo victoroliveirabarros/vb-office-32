@@ -216,8 +216,18 @@ func TestParseSprite(t *testing.T) {
 	if got := img.At(0, 0); got != (color.NRGBA{0x40, 0x40, 0x40, 0x80}) {
 		t.Errorf("see-through color = %v", got)
 	}
+	odd, err := parseSprite([]byte(". transparent\n\n" + strings.Repeat(row, 24)))
+	if err != nil || odd.Bounds().Dy() != 24 {
+		t.Fatalf("16x24 sprite: %v", err)
+	}
+	if tileSized(odd) == nil {
+		t.Error("tileSized accepted a 16x24 sprite")
+	}
+	if err := tileSized(img); err != nil {
+		t.Error(err)
+	}
 	for _, bad := range []string{
-		". transparent\n\n" + strings.Repeat(row, 15),
+		". transparent\n\n",
 		". 4040408\n\n" + strings.Repeat(row, 16),
 		". transparent\n\n" + strings.Repeat(row, 15) + strings.Repeat("x", 16) + "\n",
 		". 40404\n\n" + strings.Repeat(row, 16),

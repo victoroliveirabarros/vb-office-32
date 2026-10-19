@@ -1,7 +1,8 @@
 // Command officeart builds the office map and its tile atlas from the Kenney
-// sheets in art/kenney, the sprites in art/custom and the plan in office.txt:
+// sheets in art/kenney, the sprites in art/custom and the plan in office.txt,
+// and the avatar parts from art/custom/avatar and internal/avatar:
 //
-//	go run ./tools/officeart          # writes maps/office.tmj and web/public/game/office-tiles.png
+//	go run ./tools/officeart          # writes maps/office.tmj, web/public/game/office-tiles.png, web/public/game/avatar-parts.png and web/src/avatar/*.gen.*
 //	go run ./tools/officeart -sheet /tmp/officeart   # also writes review sheets there
 //
 // It refuses to change which tiles block movement unless told to.
@@ -137,6 +138,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	av, err := generateAvatars(*root)
+	if err != nil {
+		log.Fatal(err)
+	}
 	mapPath := filepath.Join(*root, mapFile)
 	old, err := os.ReadFile(mapPath)
 	switch {
@@ -152,6 +157,9 @@ func main() {
 		if err := writeSheets(*sheet, out); err != nil {
 			log.Fatal(err)
 		}
+		if err := writeAvatarSheets(*sheet, av); err != nil {
+			log.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(*root, atlasFile), out.PNG, 0o644); err != nil {
 		log.Fatal(err)
@@ -159,6 +167,11 @@ func main() {
 	if err := os.WriteFile(mapPath, out.TMJ, 0o644); err != nil {
 		log.Fatal(err)
 	}
+	if err := av.write(*root); err != nil {
+		log.Fatal(err)
+	}
 	b := out.Atlas.Bounds()
 	fmt.Printf("%s: %d tiles, %dx%d px, %d bytes\n%s: %d bytes\n", atlasFile, len(manifest), b.Dx(), b.Dy(), len(out.PNG), mapFile, len(out.TMJ))
+	b = av.Parts.Bounds()
+	fmt.Printf("%s: %dx%d px, %d bytes\n%s, %s\n", partsFile, b.Dx(), b.Dy(), len(av.PNG), catalogFile, swatchFile)
 }
