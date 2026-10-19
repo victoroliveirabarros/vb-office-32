@@ -216,7 +216,7 @@ function selfLook(page) {
 const AROUND_SELF = (w, h, zoom) => ({ x: w / 2 - 28 * zoom, y: h / 2 - 44 * zoom, width: 56 * zoom, height: 72 * zoom })
 
 async function walk(page, prefix) {
-  const zoom = 2
+  const zoom = 3
   const clip = AROUND_SELF(1280, 800, zoom)
   for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown']) {
     await page.key(key, { up: false })
@@ -303,7 +303,7 @@ async function scenario(cdp) {
   check('our client gets the change too', echo && compact(echo.d.appearance) === compact(want), echo?.d)
   await sleep(300)
   await bia.shot('b-sees-change.png')
-  await ana.shot('a-after-save.png', AROUND_SELF(1280, 800, 2))
+  await ana.shot('a-after-save.png', AROUND_SELF(1280, 800, 3))
 
   // Esc throws the draft away.
   await ana.key('Enter')
