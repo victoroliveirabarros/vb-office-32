@@ -6,7 +6,12 @@ Assets de terceiros versionados neste repositório e suas licenças.
 
 O tileset do escritório (`web/public/game/office-tiles.png`) é gerado por
 `tools/officeart` (`make art`) a partir destas folhas, escaladas 2× sem
-alterar os desenhos.
+alterar os desenhos. Parte dos tiles Kenney é **recolorida** no gerador (troca
+de cores origem→destino declarada no manifesto, `Paint` em
+`tools/officeart/manifest.go`): paredes brancas/cinza com rodapé grafite,
+carpetes azul e cinza-azulado, tapetes e passadeiras neutros, mesas brancas,
+sofá azul-marinho, poltronas e assentos amarelos, estantes cinza e quadro
+branco. A recoloração é obra derivada de assets CC0, também **CC0 1.0**.
 
 - **Roguelike/RPG pack**, de Kenney Vleugels (https://kenney.nl/assets/roguelike-rpg-pack),
   licença **CC0 1.0** (domínio público; crédito opcional). Zip
@@ -24,11 +29,15 @@ alterar os desenhos.
   (sha256 `ade984d5cbe3f16d9e23e6dc516246649de1a7eec2540cf31d53852b690c446f`) e
   `License.txt` (sha256 `c360de4937c17defad37e46d85e3ddfbb3d7feed06058f9f26a11a25625850bb`).
 - **Sprites próprios** em `art/custom/` (cadeira de escritório nas 4 direções,
-  mesa de escritório com divisória, monitor com teclado e mouse de frente e de
-  costas, papéis com caneca, livros com celular, luminária, suculenta, TV de
-  parede 2×1, geladeira, lona, postes e cordas do ringue, saco de pancada e o
-  tile transparente de fora do prédio), desenhados para este projeto na
-  paleta Kenney como grades de texto: **CC0 1.0**.
+  baias com mesa branca, divisórias e gaveteiro, carpete das baias com moldura
+  por estação, monitor com teclado e mouse de frente e de costas, dois
+  monitores lado a lado de frente e de costas, notebook, computador, aquário,
+  papéis com caneca, livros com celular, luminária, suculenta, planta em vaso,
+  porta-retrato, TV de parede 2×1, geladeira, divisórias de vidro com caixilho
+  de alumínio, carpete modular do office, porcelanato da copa, piso emborrachado
+  do ringue, lona, postes e cordas do ringue, saco de pancada e o tile
+  transparente de fora do prédio), desenhados para este projeto na paleta
+  Kenney como grades de texto: **CC0 1.0**.
 
 ## Fonte e ícones
 

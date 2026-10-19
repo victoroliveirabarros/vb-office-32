@@ -204,10 +204,16 @@ collision, such as chairs, monitors and pictures), takes only the tiles it
 uses from the Kenney sheets in `art/kenney/` and the sprites drawn as text in
 `art/custom/`, scales them 2× with nearest neighbour to the 32 px tile and
 repeats each tile's edge pixels around it so that none bleeds into the next.
+Kenney tiles can be recolored on the way (`Paint` in
+`tools/officeart/manifest.go`, a source→target color map per tile), which
+gives the art the corporate palette while keeping its drawing.
 
-The office is an open room with 15 workstations in three desk islands with
-seats on both sides, each station two tiles wide with a monitor, keyboard and
-something beside it, office chairs, a lounge and a table for six. Above it sit the meeting room (`reuniao`, a `meeting` zone
+The office is an open room on grey carpet tiles with 12 workstations in two
+blocks of cubicles, back to back in two rows of three, each station three
+tiles wide with a white desk, side panels, drawers and its own mix of
+monitors, laptop, computer, plants and an aquarium, plus a lounge and a table
+for six. The meeting room, the private room and the ring look onto the office
+through glass partitions; outer walls are white with a graphite skirting. Above it sit the meeting room (`reuniao`, a `meeting` zone
 where screens can be shared) and the kitchen, which opens wide onto the
 office and is no zone, so talk there goes by distance as in the office; on
 its left the private room for six (`privada`) and on its right the boxing
