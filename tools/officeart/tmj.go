@@ -22,6 +22,12 @@ var zones = []zone{
 	{"Ringue de box", "ringue", "private", 1248, 320, 320, 224},
 }
 
+// Areas name the open floor for the client's lists; the server ignores them.
+var areas = []zone{
+	{Name: "Copa", ID: "copa", X: 864, Y: 32, W: 352, H: 256},
+	{Name: "Escritório aberto", ID: "escritorio", X: 384, Y: 320, W: 832, H: 448},
+}
+
 // Spawns stand on the office's walkways, at tile centers.
 var spawns = [][2]int{
 	{464, 368}, {624, 368}, {784, 368}, {944, 368}, {1104, 368},
@@ -148,6 +154,15 @@ func encodeTMJ(l *Layers, ids map[string]int, atlasW, atlasH int) ([]byte, error
 		id++
 	}
 	m.Layers = append(m.Layers, zs)
+	as := group("areas")
+	for _, a := range areas {
+		as.Objects = append(as.Objects, object{
+			ID: id, Name: a.Name, X: a.X, Y: a.Y, Width: a.W, Height: a.H, Visible: true,
+			Properties: []property{{"id", "string", a.ID}},
+		})
+		id++
+	}
+	m.Layers = append(m.Layers, as)
 	m.NextLayerID, m.NextObjectID = len(m.Layers)+1, id
 
 	b, err := json.MarshalIndent(m, "", "  ")
