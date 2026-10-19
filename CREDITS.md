@@ -59,8 +59,8 @@ do catálogo: **CC0 1.0**.
   `@fontsource-variable/montserrat` 5.3.0, em `web/public/fonts/`, com a licença
   em `web/public/fonts/OFL.txt`.
 - **Lucide** 1.59.0 (`lucide-static`, https://lucide.dev), licença **ISC**, © Lucide
-  Icons and Contributors; os ícones derivados do Feather (aqui `log-out`, `x` e
-  `circle-alert`, antes `alert-circle`) também sob **MIT**, © 2013-present Cole
-  Bemis. Sprite `web/public/icons.svg` só com os símbolos usados, montado a partir
-  de `icons/*.svg` do pacote sem alterar os desenhos; licença completa em
-  `web/public/icons-LICENSE.txt`.
+  Icons and Contributors; os ícones derivados do Feather (aqui `log-out`, `x`,
+  `circle-alert`, antes `alert-circle`, `zoom-in` e `zoom-out`) também sob
+  **MIT**, © 2013-present Cole Bemis. Sprite `web/public/icons.svg` só com os
+  símbolos usados, montado a partir de `icons/*.svg` do pacote sem alterar os
+  desenhos; licença completa em `web/public/icons-LICENSE.txt`.
