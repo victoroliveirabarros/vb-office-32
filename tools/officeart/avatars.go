@@ -39,6 +39,9 @@ var (
 	bob        = [avatarFrames]int{0, 1, 1}
 )
 
+// eyeShine is the white of the eyes, a fixed color of the body.
+const eyeShine = "f5f1ea"
+
 // avatarRow is one row of the parts atlas: a layer, or one style of it.
 type avatarRow struct {
 	name     string
@@ -56,7 +59,7 @@ func avatarRows(cats []avatar.Category) []avatarRow {
 	with := func(a []string, b ...string) []string { return append(slices.Clone(a), b...) }
 	rows := []avatarRow{
 		{name: "body", file: "body", animated: true, roles: []avatar.Field{avatar.Skin},
-			need: keys(avatar.Skin), allow: with(keys(avatar.Skin), avatar.Outline, avatar.Eyes, avatar.Shadow)},
+			need: keys(avatar.Skin), allow: with(keys(avatar.Skin), avatar.Outline, avatar.Eyes, eyeShine, avatar.Shadow)},
 		{name: "pants", file: "pants", animated: true, roles: []avatar.Field{avatar.Pants},
 			need: keys(avatar.Pants), allow: with(keys(avatar.Pants), avatar.Outline, avatar.Shoe, avatar.Sole)},
 		{name: "shirt", file: "shirt", animated: true, roles: []avatar.Field{avatar.Shirt, avatar.Skin},
@@ -107,7 +110,7 @@ func checkKeys(cats []avatar.Category) error {
 			owner[k] = c.Field
 		}
 	}
-	fixed := []string{avatar.Outline, avatar.Eyes, avatar.Shoe, avatar.Sole, avatar.Shadow}
+	fixed := []string{avatar.Outline, avatar.Eyes, eyeShine, avatar.Shoe, avatar.Sole, avatar.Shadow}
 	for _, o := range cats[avatar.Acc].Options {
 		fixed = append(fixed, o.Colors...)
 	}

@@ -1,9 +1,11 @@
 # Avatar body: head, face and the see-through shadow; rows down, up, right;
 # columns idle, step A, step B (16x24 frames, the left view mirrors right).
-# Drawn in the skin keys of internal/avatar. CC0 1.0, vb-office-32.
+# Drawn in the skin keys of internal/avatar; the eye shine w keeps the eyes
+# readable on the darkest skins. CC0 1.0, vb-office-32.
 . transparent
 K 26292e
 e 26292e
+w f5f1ea
 a f7d7bc
 b edbe9a
 c d29a76
@@ -15,8 +17,8 @@ s 00000040
 .KaaaaaaaaaaabK...KKaaaaaaaaKK....KKaaaaaaaaKK..
 .KaabbbbbbbbbbK..KaaaaaaaaaaabK..KaaaaaaaaaaabK.
 .KabbbbbbbbbbbK..KaabbbbbbbbbbK..KaabbbbbbbbbbK.
-KcbbbebbbbebbbcK.KabbbbbbbbbbbK..KabbbbbbbbbbbK.
-KcbbbebbbbebbbcKKcbbbebbbbebbbcKKcbbbebbbbebbbcK
+KcbbwebbbbewbbcK.KabbbbbbbbbbbK..KabbbbbbbbbbbK.
+KcbbbebbbbebbbcKKcbbwebbbbewbbcKKcbbwebbbbewbbcK
 .KbbbbbbbbbbbcK.KcbbbebbbbebbbcKKcbbbebbbbebbbcK
 ..KcbbbbbbbbcK...KbbbbbbbbbbbcK..KbbbbbbbbbbbcK.
 ...KKKKKKKKKK.....KcbbbbbbbbcK....KcbbbbbbbbcK..
@@ -63,8 +65,8 @@ KcbbbbbbbbbbbbcKKcbbbbbbbbbbbbcKKcbbbbbbbbbbbbcK
 .KaaaaaaaaaaabK...KKaaaaaaaaKK....KKaaaaaaaaKK..
 .KabbbbbbbbbbbK..KaaaaaaaaaaabK..KaaaaaaaaaaabK.
 .KbbbbbbbbbbbbK..KabbbbbbbbbbbK..KabbbbbbbbbbbK.
-.KbbbbccbbbbebK..KbbbbbbbbbbbbK..KbbbbbbbbbbbbK.
-.KbbbbcKbbbbebbK.KbbbbccbbbbebK..KbbbbccbbbbebK.
+.KbbbbccbbbwebK..KbbbbbbbbbbbbK..KbbbbbbbbbbbbK.
+.KbbbbcKbbbbebbK.KbbbbccbbbwebK..KbbbbccbbbwebK.
 .KcbbbccbbbbbbK..KbbbbcKbbbbebbK.KbbbbcKbbbbebbK
 ..KcbbbbbbbbbK...KcbbbccbbbbbbK..KcbbbccbbbbbbK.
 ...KKKKKKKKKK.....KcbbbbbbbbbK....KcbbbbbbbbbK..
