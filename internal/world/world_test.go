@@ -3,6 +3,7 @@ package world
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -11,21 +12,29 @@ import (
 	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 )
 
-// asciiMap builds a map where '#' is a wall and digits are spawn points,
-// ordered by digit.
+// asciiMap builds a map where '#' is a wall, digits are spawn points,
+// ordered by digit, and each lowercase letter is a zone with that id
+// covering the bounding box of its tiles.
 func asciiMap(t testing.TB, rows ...string) *tilemap.Map {
 	t.Helper()
 	w, h := len(rows[0]), len(rows)
 	walls := make([]int, 0, w*h)
 	spawns := make([]map[string]any, 10)
+	boxes := make(map[rune][4]int)
 	for y, row := range rows {
 		for x, c := range row {
 			gid := 0
-			if c == '#' {
+			switch {
+			case c == '#':
 				gid = 3
-			}
-			if c >= '0' && c <= '9' {
+			case c >= '0' && c <= '9':
 				spawns[c-'0'] = map[string]any{"point": true, "x": x*32 + 16, "y": y*32 + 16}
+			case c >= 'a' && c <= 'z':
+				b, ok := boxes[c]
+				if !ok {
+					b = [4]int{x, y, x, y}
+				}
+				boxes[c] = [4]int{min(b[0], x), min(b[1], y), max(b[2], x), max(b[3], y)}
 			}
 			walls = append(walls, gid)
 		}
@@ -35,6 +44,18 @@ func asciiMap(t testing.TB, rows ...string) *tilemap.Map {
 		if s != nil {
 			objects = append(objects, s)
 		}
+	}
+	var zones []map[string]any
+	for _, c := range slices.Sorted(maps.Keys(boxes)) {
+		b := boxes[c]
+		zones = append(zones, map[string]any{
+			"name": "Zona " + string(c),
+			"x":    b[0] * 32, "y": b[1] * 32, "width": (b[2] - b[0] + 1) * 32, "height": (b[3] - b[1] + 1) * 32,
+			"properties": []any{
+				map[string]any{"name": "id", "type": "string", "value": string(c)},
+				map[string]any{"name": "kind", "type": "string", "value": "meeting"},
+			},
+		})
 	}
 	b, err := json.Marshal(map[string]any{
 		"orientation": "orthogonal",
@@ -46,6 +67,7 @@ func asciiMap(t testing.TB, rows ...string) *tilemap.Map {
 			map[string]any{"name": "floor", "type": "tilelayer", "width": w, "height": h, "data": make([]int, w*h)},
 			map[string]any{"name": "walls", "type": "tilelayer", "width": w, "height": h, "data": walls},
 			map[string]any{"name": "spawns", "type": "objectgroup", "objects": objects},
+			map[string]any{"name": "zones", "type": "objectgroup", "objects": zones},
 		},
 	})
 	if err != nil {

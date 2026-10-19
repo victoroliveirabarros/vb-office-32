@@ -274,6 +274,38 @@ func BenchmarkStepProximity200(b *testing.B) {
 		rows[i] = strings.Repeat(".", 40)
 	}
 	rows[0] = "0" + rows[0][1:]
+	benchmarkStep(b, rows)
+}
+
+// BenchmarkStepProximity200Zones puts four 10x8 rooms in the same open
+// area, so about a third of the players are in a zone at any time.
+func BenchmarkStepProximity200Zones(b *testing.B) {
+	rows := make([]string, 25)
+	for y := range rows {
+		row := []byte(strings.Repeat(".", 40))
+		for x := range row {
+			if y >= 2 && y < 10 || y >= 14 && y < 22 {
+				switch {
+				case x >= 3 && x < 13 && y < 12:
+					row[x] = 'a'
+				case x >= 24 && x < 34 && y < 12:
+					row[x] = 'b'
+				case x >= 3 && x < 13:
+					row[x] = 'c'
+				case x >= 24 && x < 34:
+					row[x] = 'd'
+				}
+			}
+		}
+		rows[y] = string(row)
+	}
+	rows[0] = "0" + rows[0][1:]
+	benchmarkStep(b, rows)
+}
+
+// benchmarkStep moves 200 players at random on the map, one step each per
+// tick.
+func benchmarkStep(b *testing.B, rows []string) {
 	s := NewSpace(asciiMap(b, rows...))
 	rng := rand.New(rand.NewPCG(1, 2))
 	ids := make([]string, 200)

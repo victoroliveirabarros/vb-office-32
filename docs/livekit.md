@@ -31,18 +31,123 @@ out, since the chat uses it too.
 
 Each WebSocket session gets a token for the LiveKit room named after the
 space (`office`), with the player ID as identity and the display name as
-name. It may join, publish microphone and camera, and subscribe; it may not
-publish data, change its own metadata or administer the room.
+name. It may join, publish microphone, camera and screen (no screen audio),
+and subscribe; it may not publish data, change its own metadata or
+administer the room. It never carries `recorder`, which ignores the
+publishers' permissions below.
 
 Tokens last 10 minutes and the server sends a new `media` message about
 every 5 minutes (it checks once a minute). A connected participant does not need them: LiveKit refreshes
 its token over the signaling connection by itself. The latest token is only
 used to connect again after a drop.
 
-Who hears whom is decided by the client, which subscribes only to players
-in its `nearby` set. Anyone holding a token can technically subscribe to
-anyone in the room, which matches an open-plan office; private rooms come
-with zones as separate LiveKit rooms.
+## Who receives whom
+
+The whole office is one LiveKit room. What keeps a meeting room private is
+each publisher's **subscription permissions**: every client tells LiveKit
+that only the players in its `nearby` set may receive its tracks
+(`setTrackSubscriptionPermissions(false, [{participantIdentity, allowAll:
+true}, …])`), and the SFU enforces it. Inside a zone `nearby` is everyone
+in the same zone and nobody else (`specs/phase1-protocol.md`), so whoever
+stands outside, even at the door, cannot receive anything from inside.
+
+- **Order.** Nobody is allowed from the moment the client creates the
+  room; the SDK sends that on connect, before anything is published. Once
+  `connect()` resolves the client sends the current set and only then
+  opens the microphone and camera. The list is sent again on every
+  `nearby` that changes it, and emptied on `welcome` and whenever the game
+  socket is not open (the server no longer places us).
+- **In the SFU.** A subscription without permission is answered with
+  `not_allowed`; LiveKit keeps the request and completes it as soon as the
+  publisher allows it. Revoking closes the forwarding at once. `allowAll`
+  per identity covers tracks published later (a screen share), and the
+  permissions survive a resume and are sent again after a restart. Speaking
+  indicators only reach those subscribed. `not_allowed` is the normal
+  state for someone not yet near, not an error (the client logs it at debug
+  level when it lasts more than 3 seconds).
+- **Revocation needs the publisher's signaling.** Only the publisher can
+  change its permissions. While its signaling connection is reconnecting
+  (`SignalReconnecting`, a resume) the SDK queues the update and media
+  already forwarded keeps flowing until the connection is back; a full
+  reconnect sends the permissions again before republishing anything.
+- **The edge on entering.** Permissions follow `nearby`, so whoever was
+  near someone in the open area keeps receiving them for one permission
+  round trip after they step into a room: about 220 to 270 ms from their
+  `zone` message to the last bytes, measured with a modified client that
+  keeps subscribing. What leaks is the first quarter second said inside the
+  door; that limit is accepted.
+- **Modified clients.** A subscriber that asks for everything still sees
+  who is in the room and what they publish, but gets no media and no
+  speaking indicator. A modified publisher can only expose itself. Who is
+  in which room is public anyway: positions travel to everyone and the map
+  is public.
+- **Discarded:** one LiveKit room per zone (no `MoveParticipant` in the
+  open-source server, so every door would cost a reconnection of 0.5 to
+  1.5 s, plus N rooms for the webhook and the reconciliation), and
+  `UpdateSubscriptions`/`UpdateParticipant`, which have no per-pair rule.
+
+Measured with `web/e2e/intruder.mjs` (below) against LiveKit v1.13.10 and
+Chrome headless, 13 runs on one machine. Ana sits inside Sala 1 with
+microphone, camera and screen; Eve is a modified client with a valid
+session that subscribes to everything (`autoSubscribe: true`):
+
+| Step | Result |
+|---|---|
+| Eve at the door (outside the zone, 3 tiles from Ana) | all 3 tracks `not_allowed`, no `TrackSubscribed`, 0 bytes received |
+| Eve steps in: `zone` message → `TrackSubscribed` | 81–210 ms (median 86) |
+| Eve steps in: `zone` message → first media bytes | 63–189 ms (median 72; sampled every 50 ms) |
+| Eve steps out: `zone` message → last media bytes | 185–232 ms (median 206) |
+| Eve steps out: `zone` message → `TrackUnsubscribed` | 278–482 ms (median 283) |
+| An honest client steps in: `zone` → audio / screen attached | 101–335 ms / 106–354 ms (median 107 / 112) |
+| Ana walks out of the room: `zone` → her share stopped | 79–198 ms (median 85) |
+
+Entering and leaving both happen on the server tick that moves the player,
+which sends `zone` and `nearby` together; the rest is the publisher's
+permission update reaching LiveKit. The SDK reports the unsubscription
+about 100 ms after the media has already stopped.
+
+## Screen sharing
+
+- Offered only inside a `meeting` zone, with the call connected, and not
+  while someone else in the room is sharing. Leaving the meeting room (or
+  entering a `private` one) stops the share; so do the browser's own "stop
+  sharing" button and the room dropping. Cancelling the picker is not an
+  error. A share never restarts by itself, since the picker needs a click.
+- **Leaving with a screen on air.** Stopping a share is asynchronous
+  (unpublishing takes a negotiation, and the picker or the publish may still
+  be pending at the door), while the open area's `nearby` arrives right
+  after `zone`. So outside a meeting room, while the screen is live or a
+  share call is pending, the client only ever narrows its permissions (it
+  sends the intersection of the last list and the new `nearby`) and widens
+  them to the whole `nearby` once the screen is off the air. A share whose
+  picker resolves after leaving is unpublished first. Per-track
+  permissions (leaving the screen's track out) were discarded: every
+  publish, and every full reconnect, changes the track IDs, so the list
+  would have to follow each one, and a gap would block the microphone.
+- **Reconnects.** A full reconnect unpublishes and republishes every track,
+  the screen included, without stopping its capture; only a capture that
+  really ended (the browser's button, our own stop) ends the share. Once
+  reconnected the client asks the room whether the screen is on air,
+  follows it, and stops it if it should not be (outside a meeting room or
+  turned off meanwhile).
+- **Two shares at once.** Two people may click within the same round trip,
+  before either sees the other's screen. Whoever has the larger identity
+  stops theirs and is told that someone in the room started first.
+- Published at 720p and 5 fps (`ScreenSharePresets.h720fps5`, capped at
+  800 kbit/s, `contentHint: detail`) with a 360p layer at up to
+  200 kbit/s, the SDK default for screens; dynacast pauses whichever layer
+  nobody pulls. No audio.
+- Each client watches at most one screen: only inside a meeting room, only
+  from someone in its `nearby` set, keeping the current one while it lasts
+  and otherwise the smallest identity. It shows on a large stage over the
+  map.
+- The page sends `Permissions-Policy: display-capture=(self)`;
+  `display-capture=()` would block `getDisplayMedia`.
+- LiveKit does not stop a modified client from publishing a screen outside
+  a meeting room. The server tolerates it: honest clients never subscribe
+  to a screen outside a meeting room, so it reaches nobody else and costs
+  no egress. Removing such tracks (webhook `track_published` +
+  `UpdateParticipant`) is in the backlog.
 
 ## Removal
 
@@ -196,7 +301,8 @@ Egress from the SFU dominates. Every subscriber receives each publisher it
 subscribes to, so traffic grows with the size of each conversation, not
 with the size of the office. The client keeps it down by:
 
-- subscribing only to players in `nearby`;
+- subscribing only to players in `nearby` (and publishers allowing only
+  them, so a modified client cannot pull more);
 - leaving the camera off by default and subscribing to the cameras of the
   8 closest players only, keeping a camera until someone else is more than
   a tile closer so the 8th place does not flip back and forth;
@@ -228,6 +334,15 @@ someone speaks (DTX sends almost nothing in silence), so it stays on.
 
 Small video adds about 90 kbit/s per subscribed camera (160 kbit/s at
 most).
+
+A screen share costs about 0.2 to 0.8 Mbit/s per viewer: the 720p layer
+the stage pulls is capped at 800 kbit/s at 5 fps, and a mostly static
+screen sends far less (a headless Chrome's synthetic desktop measured
+130 kbit/s at 1280x720 and 5 fps). With one screen per room and viewers
+limited to the room, a meeting of N costs at most N − 1 times that.
+
+Inside a zone everyone in the room plays at full volume; distance only
+lowers the volume in the open area.
 
 ## Metrics to watch
 
@@ -276,6 +391,28 @@ docker run --rm -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
   -e LIVEKIT_CONFIG="webhook: {api_key: devkey, urls: [http://host.docker.internal:8080/livekit/webhook]}" \
   livekit/livekit-server:v1.13 --dev --bind 0.0.0.0 --node-ip 127.0.0.1
 ```
+
+The privacy and screen-sharing measurements above come from a
+development-only harness that is not part of the build: `web/e2e/intruder.html`
+opens one participant per tab (`role=honest` runs the real media client,
+`role=intruder` subscribes to everything) and `web/e2e/intruder.mjs` drives
+headless Chrome through the DevTools protocol, with fake devices and an
+automatically picked screen. Build it for the Go server to serve, start
+LiveKit and the server, then run it:
+
+```sh
+cd web && npx vite build --config e2e/vite.config.ts   # into web/e2e/dist
+make livekit &
+VB_OFFICE32_AUTH=guest VB_OFFICE32_WEB_DIR=web/e2e/dist \
+  VB_OFFICE32_LIVEKIT_URL=ws://localhost:7880 VB_OFFICE32_LIVEKIT_API_KEY=devkey \
+  VB_OFFICE32_LIVEKIT_API_SECRET=secret go run ./cmd/vb-office-32 &
+cd web && node e2e/intruder.mjs http://localhost:8080
+```
+
+It prints the checks and latencies as JSON and exits non-zero when a check
+fails. With `make web-dev` running, `node e2e/intruder.mjs
+http://localhost:5173` uses Vite instead of a build (without the server's
+headers).
 
 The token, removal and reconciliation checks against a real server run
 with:

@@ -70,12 +70,13 @@ type Pos    = { id: string; x: number; y: number; dir: Dir }
 | `state` | `{ tick: number, ack: number, players: Pos[] }` | Fim de tick em que houve mudança OU o `ack` do destinatário avançou. `players` = só quem mudou posição/direção no tick. `ack` = último `seq` processado do destinatário (0 se nenhum). |
 | `pong` | `{ ts: number }` | Resposta a `ping`. |
 | `media` | `{ url: string, token: string, expiresAt: number }` | Só com mídia configurada. Logo após `welcome` e reemitido a cada ~5 min (verificação a cada 1 min, então entre 5 e 6 min). `url` = URL WS do LiveKit; `token` = JWT de acesso (TTL 10 min); `expiresAt` = expiração do token em unix **ms**. |
-| `nearby` | `{ ids: string[] }` | Sempre, com ou sem mídia. Ao conectar (mesmo vazio) e no fim de todo tick em que o conjunto do destinatário mudou (depois do `state` desse tick, se houver). Conjunto completo de quem está perto, ordenado, sem o próprio. |
+| `zone` | `{ id: string, name?: string, kind?: "meeting" \| "private" }` | Sempre, com ou sem mídia; só para o próprio jogador. Ao conectar (fora de zona: `{ id: "" }`) e no fim de todo tick em que o destinatário cruzou a borda de uma zona (depois do `state` e antes do `nearby` desse tick). Fora de zona só vai `id`, vazio. Ver [Zonas](#zonas). |
+| `nearby` | `{ ids: string[] }` | Sempre, com ou sem mídia. Ao conectar (mesmo vazio) e no fim de todo tick em que o conjunto do destinatário mudou (depois do `state` e do `zone` desse tick, se houver). Conjunto completo de quem o destinatário ouve (ver [Proximidade](#proximidade) e [Zonas](#zonas)), ordenado, sem o próprio. |
 | `chat` | `Chat` | Mensagem de chat para o destinatário, ou eco para o remetente (com `cid`). |
 | `chatHistory` | `{ messages: Chat[] }` | Ao conectar, sempre (mesmo vazio): últimas ≤ 100 mensagens `everyone`, mais antiga primeiro, sem `cid`. |
 | `chatError` | `{ cid: string, reason: "invalid" \| "empty" \| "too_long" \| "rate_limited" \| "offline" }` | Chat recusado; só para o remetente. |
 
-Ordem ao conectar: `welcome` → `media` (só com mídia) → `nearby` → `chatHistory`; só então os outros recebem `joined`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
+Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby` → `chatHistory`; só então os outros recebem `joined`. Ordem no fim de um tick: `state` → `zone` → `nearby`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
 
 ## Proximidade
 
@@ -83,7 +84,16 @@ Ordem ao conectar: `welcome` → `media` (só com mídia) → `nearby` → `chat
 - Par entra no conjunto com `d² ≤ 16` (4 tiles) e sai com `d² > 25` (5 tiles); `16 < d² ≤ 25` mantém o estado anterior (histerese).
 - Simétrica: A está no conjunto de B ⇔ B está no de A. Paredes não bloqueiam.
 - Vale para mídia e para o chat `nearby`. Calculada no tick: só posição conta (virar não muda nada). Jogador novo é avaliado no tick seguinte à entrada, por isso o primeiro `nearby` dele vem vazio; reconexão da mesma identidade mantém o conjunto. Quem sai é removido dos vizinhos, que recebem `nearby` no tick seguinte.
+- Essa regra só vale entre dois jogadores fora de zonas; com zona, vale [Zonas](#zonas).
 - Volume (cliente, fase 3b): 1,0 em `d ≤ 1`, linear até 0,2 em `d = 4`, 0,2 na faixa de histerese, 0 fora do conjunto.
+
+## Zonas
+
+- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião) ou `private` (cabine). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
+- Quem está numa zona ouve e é ouvido por todos da mesma zona, a qualquer distância, e por ninguém de fora, nem colado na porta. Fora de zonas vale a [Proximidade](#proximidade), só entre quem também está fora.
+- Mudança de zona é imediata no tick em que o jogador cruza a borda: sem histerese, e quem sai de uma zona não herda a histerese da distância (dois que saem juntos a `d² = 25` não ficam no conjunto).
+- O jogador recebe `zone` com a zona em que está ao conectar e a cada mudança; a zona dos outros não vai no protocolo (o cliente deriva das posições e do mapa, ambos públicos — presença por sala não é segredo).
+- O chat `nearby` herda a regra: dentro de uma zona chega só a quem está nela.
 
 ### Token LiveKit
 
@@ -138,6 +148,7 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
   - `floor` (tilelayer)
   - `walls` (tilelayer) — qualquer gid ≠ 0 bloqueia
   - `spawns` (objectgroup) — objetos `point: true`; tile = `floor(x/32), floor(y/32)`
+- Camada opcional `zones` (objectgroup): um retângulo (sem `point`, `ellipse`, `polygon`, `polyline`, `text` ou `gid`; `rotation` 0) por zona, até 255. O `name` nativo do objeto é o nome exibido (1–40 runes, não vazio); propriedades Tiled `string`: `id` (`[a-z0-9-]{1,32}`, único) e `kind` (`meeting` ou `private`). Tile na zona se o centro `(32x+16, 32y+16)` cai em `[x, x+width) × [y, y+height)`. O servidor recusa o mapa no boot se uma zona é inválida, tem `width`/`height` ≤ 0, não cobre nenhum tile, divide tile com outra, ou se um spawn cai numa zona.
 - Tileset embutido no `.tmj`:
 
 ```json

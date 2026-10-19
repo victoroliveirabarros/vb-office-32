@@ -51,6 +51,8 @@ export class ChatState {
   private seq = 0
   private readonly tabsByKey = new Map<TabKey, Tab>()
   private readonly pending = new Map<string, Entry>()
+  // Own sends of closed tabs, whose echo must not reopen them.
+  private readonly dropped = new Set<string>()
   private current: TabKey = 'everyone'
   private visible = false
   private readonly cap: number
@@ -110,10 +112,29 @@ export class ChatState {
     return key
   }
 
+  /**
+   * Closes a direct conversation, its messages with it, and selects the tab
+   * before it when it was the active one. Only direct tabs close.
+   */
+  closeTab(key: TabKey): boolean {
+    const tab = this.tabsByKey.get(key)
+    if (!tab || tab.scope !== 'direct') return false
+    const keys = [...this.tabsByKey.keys()]
+    this.tabsByKey.delete(key)
+    for (const entry of tab.entries) {
+      if (entry.cid === null || this.pending.get(entry.cid) !== entry) continue
+      this.pending.delete(entry.cid)
+      this.dropped.add(entry.cid)
+    }
+    if (this.current === key) this.select(keys[keys.indexOf(key) - 1] ?? 'everyone')
+    return true
+  }
+
   // A new connection never echoes what the old one carried.
   welcome(selfId: string, selfName: string): void {
     this.selfId = selfId
     this.selfName = selfName
+    this.dropped.clear()
     for (const cid of [...this.pending.keys()]) this.fail(cid, 'disconnected')
   }
 
@@ -149,6 +170,7 @@ export class ChatState {
   /** Adds msg and returns its tab, or null when it was a duplicate. */
   receive(msg: Chat): TabKey | null {
     const own = msg.from === this.selfId
+    if (own && msg.cid !== undefined && this.dropped.delete(msg.cid)) return null
     const peer = msg.scope === 'direct' ? (own ? msg.to : msg.from) : null
     if (peer === undefined || (msg.scope === 'direct' && peer === this.selfId)) return null
     const key: TabKey = peer === null ? (msg.scope === 'nearby' ? 'nearby' : 'everyone') : directKey(peer)
@@ -177,6 +199,7 @@ export class ChatState {
 
   /** Marks the send cid as failed; false when it is not pending. */
   fail(cid: string, reason: FailReason): boolean {
+    this.dropped.delete(cid)
     const entry = this.pending.get(cid)
     if (!entry) return false
     this.pending.delete(cid)

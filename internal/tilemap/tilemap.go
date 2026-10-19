@@ -23,7 +23,10 @@ func (p Point) Add(q Point) Point {
 type Map struct {
 	Width, Height int
 	Spawns        []Point
+	Zones         []Zone
 	blocked       []bool
+	// zoneAt holds 1 + the index in Zones of each tile's zone, 0 outside.
+	zoneAt []uint8
 }
 
 // Blocked reports whether p is a wall or lies outside the map.
@@ -55,10 +58,23 @@ type tiledLayer struct {
 }
 
 type tiledObject struct {
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Point bool    `json:"point"`
+	ID         int             `json:"id"`
+	Name       string          `json:"name"`
+	X          float64         `json:"x"`
+	Y          float64         `json:"y"`
+	Width      float64         `json:"width"`
+	Height     float64         `json:"height"`
+	Rotation   float64         `json:"rotation"`
+	Point      bool            `json:"point"`
+	Ellipse    bool            `json:"ellipse"`
+	Polygon    []any           `json:"polygon"`
+	Polyline   []any           `json:"polyline"`
+	Text       any             `json:"text"`
+	GID        int             `json:"gid"`
+	Properties []tiledProperty `json:"properties"`
 }
+
+var errMissingLayer = errors.New("missing layer")
 
 func LoadFile(path string) (*Map, error) {
 	f, err := os.Open(path)
@@ -110,6 +126,9 @@ func Load(r io.Reader) (*Map, error) {
 	for i, gid := range walls.Data {
 		m.blocked[i] = gid != 0
 	}
+	if err := m.loadZones(&tm); err != nil {
+		return nil, err
+	}
 	for _, o := range spawns.Objects {
 		if !o.Point {
 			continue
@@ -117,6 +136,9 @@ func Load(r io.Reader) (*Map, error) {
 		p := Point{int(math.Floor(o.X / TileSize)), int(math.Floor(o.Y / TileSize))}
 		if m.Blocked(p) {
 			return nil, fmt.Errorf("spawn at tile %d,%d is blocked", p.X, p.Y)
+		}
+		if z := m.ZoneAt(p); z >= 0 {
+			return nil, fmt.Errorf("spawn at tile %d,%d is in zone %q", p.X, p.Y, m.Zones[z].ID)
 		}
 		m.Spawns = append(m.Spawns, p)
 	}
@@ -137,7 +159,7 @@ func (tm *tiledMap) layer(name, typ string) (*tiledLayer, error) {
 		}
 		return l, nil
 	}
-	return nil, fmt.Errorf("missing layer %q", name)
+	return nil, fmt.Errorf("%w %q", errMissingLayer, name)
 }
 
 func (tm *tiledMap) tileLayer(name string) (*tiledLayer, error) {

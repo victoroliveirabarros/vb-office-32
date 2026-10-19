@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Player, ServerMessage } from '../net/protocol'
 import { DeviceFailure, MediaClient } from './client'
-import type { DeviceState, LinkState, MediaRoom, MediaView, RoomListener } from './client'
+import type { DeviceState, LinkState, MediaRoom, MediaView, RoomListener, ScreenState } from './client'
 import type { MediaPrefs } from './prefs'
-import type { Publication, TrackKind } from './subscriptions'
+import type { Publication, TrackSource } from './subscriptions'
 
 const NOW = 1_800_000_000_000
 const URL = 'ws://localhost:7880'
@@ -22,12 +22,43 @@ class FakeRoom implements MediaRoom {
   // Holds the next camera call until resolved.
   cameraGate: Promise<void> | null = null
   audioStarts = 0
+  // Every subscriber list sent; log also records connects and the mic.
+  allowed: string[][] = []
+  log: string[] = []
+  screen: boolean[] = []
+  screenResult: boolean | Error = true
+  // Holds the next screen call until resolved.
+  screenGate: Promise<void> | null = null
 
   constructor(readonly listener: RoomListener) {}
 
   async connect(_url: string, token: string): Promise<void> {
     this.connects.push(token)
+    this.log.push(`connect ${token}`)
     if (this.connectError) throw this.connectError
+  }
+  setAllowedSubscribers(ids: readonly string[]): void {
+    this.allowed.push([...ids])
+    this.log.push(`allow [${ids.join(',')}]`)
+  }
+  // Whether the screen is on air, as the SDK would tell.
+  shared = false
+  async setScreenShareEnabled(on: boolean): Promise<void> {
+    this.screen.push(on)
+    this.log.push(`screen ${on}`)
+    const gate = this.screenGate
+    this.screenGate = null
+    await gate
+    if (!on) {
+      this.shared = false
+      return
+    }
+    const result = this.screenResult
+    if (result instanceof Error) throw result
+    this.shared = result
+  }
+  screenShared(): boolean {
+    return this.shared
   }
   async disconnect(): Promise<void> {
     this.disconnects++
@@ -47,6 +78,7 @@ class FakeRoom implements MediaRoom {
   }
   async setMicrophoneEnabled(on: boolean): Promise<void> {
     this.mic.push(on)
+    this.log.push(`mic ${on}`)
     if (this.micError) throw this.micError
   }
   async setCameraEnabled(on: boolean): Promise<HTMLMediaElement | null> {
@@ -61,9 +93,14 @@ class FakeRoom implements MediaRoom {
     this.canPlaybackAudio = true
   }
 
-  publish(identity: string, kind: TrackKind, muted = false): void {
+  publish(identity: string, source: TrackSource, muted = false): void {
     if (!this.remote.includes(identity)) this.remote.push(identity)
-    this.pubs.push({ identity, sid: `${identity}-${kind}`, kind, desired: false, muted })
+    this.pubs.push({ identity, sid: `${identity}-${source}`, source, desired: false, muted })
+    this.listener.changed()
+  }
+
+  unpublish(identity: string, source: TrackSource): void {
+    this.pubs = this.pubs.filter((p) => p.sid !== `${identity}-${source}`)
     this.listener.changed()
   }
 
@@ -76,6 +113,8 @@ class FakeView implements MediaView {
   links: LinkState[] = []
   mic: DeviceState | null = null
   camera: DeviceState | null = null
+  screen: ScreenState | null = null
+  stage: string | null = null
   blocked = false
   audio: HTMLMediaElement[] = []
   readonly videos = new Map<string, string>()
@@ -89,6 +128,15 @@ class FakeView implements MediaView {
   }
   setCamera(state: DeviceState): void {
     this.camera = state
+  }
+  setScreen(state: ScreenState): void {
+    this.screen = state
+  }
+  showScreen(identity: string): void {
+    this.stage = identity
+  }
+  hideScreen(identity: string): void {
+    if (this.stage === identity) this.stage = null
   }
   setPlaybackBlocked(blocked: boolean): void {
     this.blocked = blocked
@@ -109,6 +157,7 @@ class FakeView implements MediaView {
     this.audio = []
     this.videos.clear()
     this.self = null
+    this.stage = null
   }
   get link(): LinkState | undefined {
     return this.links.at(-1)
@@ -143,6 +192,10 @@ const welcome = (players: Player[]): ServerMessage => ({
 })
 const media = (token: string, expiresAt = NOW + 600_000): ServerMessage => ({ t: 'media', d: { url: URL, token, expiresAt } })
 const nearby = (...ids: string[]): ServerMessage => ({ t: 'nearby', d: { ids } })
+const zone = (id = '', kind: 'meeting' | 'private' = 'meeting'): ServerMessage => ({
+  t: 'zone',
+  d: id === '' ? { id } : { id, name: id, kind },
+})
 const moved = (id: string, x: number, y = 0): ServerMessage => ({
   t: 'state',
   d: { tick: 1, ack: 0, players: [{ id, x, y, dir: 'down' }] },
@@ -230,23 +283,23 @@ describe('MediaClient', () => {
     await vi.runAllTimersAsync()
     const r = room()
     for (const p of [...others, player('far', 30)]) {
-      r.publish(p.id, 'audio')
-      r.publish(p.id, 'video', p.id === 'p0')
+      r.publish(p.id, 'microphone')
+      r.publish(p.id, 'camera', p.id === 'p0')
     }
     expect(r.subscribed()).toEqual([])
 
     client.handle(nearby(...others.map((p) => p.id)))
-    expect(r.subscribed().filter((sid) => sid.endsWith('audio'))).toHaveLength(10)
-    expect(r.subscribed().filter((sid) => sid.endsWith('video'))).toEqual(
-      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((id) => `${id}-video`),
+    expect(r.subscribed().filter((sid) => sid.endsWith('microphone'))).toHaveLength(10)
+    expect(r.subscribed().filter((sid) => sid.endsWith('camera'))).toEqual(
+      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((id) => `${id}-camera`),
     )
 
     client.handle(moved('p9', 1, 1))
-    expect(r.subscribed()).toContain('p9-video')
-    expect(r.subscribed()).not.toContain('p8-video')
+    expect(r.subscribed()).toContain('p9-camera')
+    expect(r.subscribed()).not.toContain('p8-camera')
 
     client.handle(nearby('p1'))
-    expect(r.subscribed()).toEqual(['p1-audio', 'p1-video'])
+    expect(r.subscribed()).toEqual(['p1-microphone', 'p1-camera'])
   })
 
   it('keeps the 8th camera until another is clearly closer', async () => {
@@ -256,21 +309,21 @@ describe('MediaClient', () => {
     client.handle(media('t1'))
     await vi.runAllTimersAsync()
     const r = room()
-    for (const p of [...others, player('p9', 8, 1)]) r.publish(p.id, 'video')
+    for (const p of [...others, player('p9', 8, 1)]) r.publish(p.id, 'camera')
     client.handle(nearby(...others.map((p) => p.id), 'p9'))
-    expect(r.subscribed()).toContain('p8-video')
+    expect(r.subscribed()).toContain('p8-camera')
 
     client.handle(moved('p8', 9))
-    expect(r.subscribed()).toContain('p8-video')
-    expect(r.subscribed()).not.toContain('p9-video')
+    expect(r.subscribed()).toContain('p8-camera')
+    expect(r.subscribed()).not.toContain('p9-camera')
     client.handle(moved('p8', 8))
     client.handle(moved('p9', 8, 1))
-    expect(r.subscribed()).toContain('p8-video')
-    expect(r.subscribed()).not.toContain('p9-video')
+    expect(r.subscribed()).toContain('p8-camera')
+    expect(r.subscribed()).not.toContain('p9-camera')
 
     client.handle(moved('p9', 6, 1))
-    expect(r.subscribed()).toContain('p9-video')
-    expect(r.subscribed()).not.toContain('p8-video')
+    expect(r.subscribed()).toContain('p9-camera')
+    expect(r.subscribed()).not.toContain('p8-camera')
   })
 
   it('hides a tile as soon as its video is unsubscribed', async () => {
@@ -278,9 +331,9 @@ describe('MediaClient', () => {
     client.handle(welcome([player('ana', 2)]))
     client.handle(media('t1'))
     await vi.runAllTimersAsync()
-    room().publish('ana', 'video')
+    room().publish('ana', 'camera')
     client.handle(nearby('ana'))
-    room().listener.subscribed({ identity: 'ana', kind: 'video', attach: () => element('ana') })
+    room().listener.subscribed({ identity: 'ana', source: 'camera', attach: () => element('ana') })
     expect(view.videos.get('ana')).toBe('ANA')
 
     client.handle(nearby())
@@ -312,7 +365,7 @@ describe('MediaClient', () => {
     client.handle(welcome([]))
     client.handle(media('t1'))
     await vi.runAllTimersAsync()
-    room().listener.subscribed({ identity: 'ana', kind: 'audio', attach: () => element('a') })
+    room().listener.subscribed({ identity: 'ana', source: 'microphone', attach: () => element('a') })
     expect(view.audio).toHaveLength(1)
   })
 
@@ -552,6 +605,394 @@ describe('MediaClient', () => {
     room().listener.speakers(['bob', 'ana', 'me'])
     client.handle(nearby())
     expect(seen).toEqual([[], ['ana', 'me'], ['me']])
+  })
+
+  it('allows nobody before connecting and the nearby set before opening devices', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1)]))
+    client.handle(nearby('ana'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    expect(room().log).toEqual(['allow []', 'connect t1', 'allow [ana]', 'mic true'])
+  })
+
+  it('updates permissions on each nearby, only when they change', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 2)]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    r.allowed = []
+    client.handle(nearby('bob', 'ana'))
+    client.handle(nearby('ana', 'bob'))
+    client.handle(nearby('ana'))
+    expect(r.allowed).toEqual([['ana', 'bob'], ['ana']])
+  })
+
+  it('allows nobody while the game socket is down and from a welcome until the next nearby', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1)]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    r.allowed = []
+
+    client.setConnectionStatus('reconnecting')
+    expect(r.allowed).toEqual([[]])
+    client.setConnectionStatus('open')
+    client.handle(welcome([player('ana', 1)]))
+    client.handle(nearby('ana'))
+    expect(r.allowed).toEqual([[], ['ana']])
+
+    client.handle(welcome([player('ana', 1)]))
+    expect(r.allowed).toEqual([[], ['ana'], []])
+  })
+
+  it('allows the nearby set again after the room reconnects', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1)]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    client.handle(nearby('ana'))
+    const r = room()
+    r.log = []
+    r.listener.disconnected('other')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(r.log).toEqual(['allow []', 'connect t1', 'allow [ana]', 'mic true'])
+  })
+
+  it('plays everyone in the same zone at full volume', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 3), player('bob', 8)]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    r.remote = ['ana', 'bob']
+    client.handle(nearby('ana'))
+    expect(r.volumes.get('ana')).toBeCloseTo(1 - 1.6 / 3)
+
+    client.handle(zone('sala-1'))
+    client.handle(nearby('ana', 'bob'))
+    expect(r.volumes.get('ana')).toBe(1)
+    expect(r.volumes.get('bob')).toBe(1)
+
+    client.handle(zone())
+    client.handle(nearby('ana'))
+    expect(r.volumes.get('ana')).toBeCloseTo(1 - 1.6 / 3)
+    expect(r.volumes.get('bob')).toBe(0)
+  })
+
+  it('shares the screen only in a meeting room and stops on leaving it', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.toggleScreen()
+    client.handle(zone('cabine', 'private'))
+    client.toggleScreen()
+    expect(r.screen).toEqual([])
+    expect(view.screen).toMatchObject({ on: false, meeting: false })
+
+    client.handle(zone('sala-1'))
+    expect(view.screen).toMatchObject({ on: false, meeting: true })
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true])
+    expect(view.screen).toEqual({ on: true, busy: false, error: null, meeting: true, taken: false })
+
+    client.handle(zone())
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, false])
+    expect(view.screen).toMatchObject({ on: false, busy: false, meeting: false })
+  })
+
+  it('stops a share whose picker was still open when leaving the room', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    const picked = deferred()
+    r.screenGate = picked.promise
+    client.toggleScreen()
+    client.handle(zone())
+    picked.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, false])
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('treats a cancelled picker as off without an error and reports failures', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    r.screenResult = false
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    expect(view.screen).toMatchObject({ on: false, busy: false, error: null })
+
+    r.screenResult = new DeviceFailure('other')
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    expect(view.screen).toMatchObject({ on: false, busy: false, error: 'other' })
+    expect(r.screen).toEqual([true, true])
+  })
+
+  it('follows a share stopped from the browser', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    r.listener.screenEnded()
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, true])
+  })
+
+  it('does not share again by itself after the room drops', async () => {
+    const client = setup()
+    client.handle(welcome([]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    r.listener.disconnected('other')
+    expect(view.screen).toMatchObject({ on: false })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(client.state).toBe('connected')
+    expect(r.screen).toEqual([true])
+  })
+
+  // A full reconnect unpublishes and republishes the screen; the room is the
+  // truth once reconnected.
+  it('stops a share a full reconnect published again after reporting it ended', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    r.listener.reconnecting()
+    r.listener.screenEnded()
+    expect(view.screen).toMatchObject({ on: false })
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, false])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('keeps a share across a full reconnect and stops it on leaving the room', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    r.listener.reconnecting()
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true])
+    expect(view.screen).toMatchObject({ on: true, busy: false })
+
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []', 'allow [bob]'])
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('leaves the room during a reconnect without letting the open area in before the share stops', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    r.listener.reconnecting()
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    r.listener.reconnected()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []'])
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []', 'allow [bob]'])
+    expect(r.shared).toBe(false)
+  })
+
+  it('lets the open area in only once a share stopped on leaving the room', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('ana', 'bob'))
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false'])
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow [ana,bob]'])
+  })
+
+  it('unpublishes a share whose picker resolved after leaving the room before letting anyone new in', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    const picked = deferred()
+    r.screenGate = picked.promise
+    client.toggleScreen()
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    expect(view.screen).toMatchObject({ on: false, busy: true, meeting: false })
+
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    picked.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.shared).toBe(true)
+    expect(r.log).toEqual(['allow []', 'screen false'])
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['allow []', 'screen false', 'allow [bob]'])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+  })
+
+  it('lets the open area in once a picker left open at the door is cancelled', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
+    const picked = deferred()
+    r.screenGate = picked.promise
+    r.screenResult = false
+    client.toggleScreen()
+    r.log = []
+    client.handle(zone())
+    client.handle(nearby('bob'))
+    picked.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['allow []', 'allow [bob]'])
+    expect(r.screen).toEqual([true])
+  })
+
+  it('gives way to a share started at the same time by a smaller identity', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('zoe', 2)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana', 'zoe'))
+    const published = deferred()
+    r.screenGate = published.promise
+    client.toggleScreen()
+    r.publish('zoe', 'screen')
+    expect(view.screen).toMatchObject({ on: true, busy: true })
+    r.publish('ana', 'screen')
+    expect(view.screen).toMatchObject({ on: false, busy: true, error: 'taken' })
+    published.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true, false])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false, error: 'taken' })
+  })
+
+  it('watches one screen of the room, keeping the current one', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 2), player('cid', 3)]))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    r.publish('bob', 'screen')
+    r.publish('cid', 'screen')
+    client.handle(nearby('bob', 'cid'))
+    expect(r.subscribed()).not.toContain('bob-screen')
+    expect(view.screen).toMatchObject({ taken: true })
+
+    client.handle(zone('sala-1'))
+    expect(r.subscribed().filter((sid) => sid.endsWith('screen'))).toEqual(['bob-screen'])
+    r.listener.subscribed({ identity: 'bob', source: 'screen', attach: () => element('bob') })
+    expect(view.stage).toBe('bob')
+
+    r.publish('ana', 'screen')
+    client.handle(nearby('ana', 'bob', 'cid'))
+    expect(r.subscribed().filter((sid) => sid.endsWith('screen'))).toEqual(['bob-screen'])
+
+    r.unpublish('bob', 'screen')
+    r.listener.unsubscribed('bob', 'screen')
+    expect(view.stage).toBeNull()
+    expect(r.subscribed().filter((sid) => sid.endsWith('screen'))).toEqual(['ana-screen'])
+
+    client.handle(nearby('cid'))
+    expect(r.subscribed().filter((sid) => sid.endsWith('screen'))).toEqual(['cid-screen'])
+    client.handle(zone())
+    expect(r.subscribed().filter((sid) => sid.endsWith('screen'))).toEqual([])
+  })
+
+  it('does not start a share while someone else in the room shares', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1)]))
+    client.handle(zone('sala-1'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    r.publish('ana', 'screen')
+    client.handle(nearby('ana'))
+    client.toggleScreen()
+    expect(r.screen).toEqual([])
+    r.unpublish('ana', 'screen')
+    expect(view.screen).toMatchObject({ taken: false })
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    expect(r.screen).toEqual([true])
   })
 
   it('offers to unlock audio when the browser blocks playback', async () => {

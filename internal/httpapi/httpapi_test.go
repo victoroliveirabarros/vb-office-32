@@ -170,7 +170,7 @@ func TestSecurityHeaders(t *testing.T) {
 					"Content-Security-Policy":    tt.csp,
 					"X-Content-Type-Options":     "nosniff",
 					"Referrer-Policy":            "no-referrer",
-					"Permissions-Policy":         "camera=(self), microphone=(self), geolocation=(), display-capture=()",
+					"Permissions-Policy":         "camera=(self), microphone=(self), geolocation=(), display-capture=(self)",
 					"Cross-Origin-Opener-Policy": "same-origin",
 					"Strict-Transport-Security":  "",
 				}

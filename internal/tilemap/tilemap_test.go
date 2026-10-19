@@ -2,6 +2,7 @@ package tilemap
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -117,5 +118,47 @@ func TestOfficeMap(t *testing.T) {
 	}
 	if len(m.Spawns) < 6 {
 		t.Errorf("got %d spawns, want at least 6", len(m.Spawns))
+	}
+
+	kinds := make(map[Kind]int)
+	for _, z := range m.Zones {
+		kinds[z.Kind]++
+	}
+	if kinds[Meeting] != 2 || kinds[Private] < 1 {
+		t.Errorf("zones = %+v, want 2 meeting and at least 1 private", m.Zones)
+	}
+	// Doors lead into each room but stay outside it.
+	for _, door := range []Point{{6, 9}, {17, 9}, {25, 9}, {26, 9}} {
+		if m.Blocked(door) || m.ZoneAt(door) >= 0 {
+			t.Errorf("door %v: blocked %v, zone %d", door, m.Blocked(door), m.ZoneAt(door))
+		}
+		if in := m.ZoneAt(door.Add(Point{Y: -1})); in < 0 {
+			t.Errorf("tile above door %v is in no zone", door)
+		}
+	}
+
+	// Every free tile is reachable from the spawns.
+	seen := make([]bool, m.Width*m.Height)
+	queue := slices.Clone(m.Spawns)
+	for _, p := range queue {
+		seen[p.Y*m.Width+p.X] = true
+	}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		for _, d := range []Point{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+			q := p.Add(d)
+			if !m.Blocked(q) && !seen[q.Y*m.Width+q.X] {
+				seen[q.Y*m.Width+q.X] = true
+				queue = append(queue, q)
+			}
+		}
+	}
+	for y := range m.Height {
+		for x := range m.Width {
+			if p := (Point{x, y}); !m.Blocked(p) && !seen[y*m.Width+x] {
+				t.Errorf("free tile %v is unreachable from the spawns", p)
+			}
+		}
 	}
 }

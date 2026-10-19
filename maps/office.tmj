@@ -10,8 +10,8 @@
   "tilewidth": 32,
   "tileheight": 32,
   "compressionlevel": -1,
-  "nextlayerid": 4,
-  "nextobjectid": 9,
+  "nextlayerid": 5,
+  "nextobjectid": 12,
   "layers": [
     {
       "id": 1,
@@ -71,7 +71,7 @@
         3,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,3,0,0,4,4,4,4,0,0,0,3,
         3,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,3,
         3,5,0,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,5,3,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,3,
-        3,3,3,3,3,3,0,3,3,3,3,3,3,3,3,3,3,0,3,3,3,3,3,0,0,0,0,0,0,3,0,6,6,6,0,0,0,0,0,3,
+        3,3,3,3,3,3,0,3,3,3,3,3,3,3,3,3,3,0,3,3,3,3,3,3,3,0,0,3,3,3,0,6,6,6,0,0,0,0,0,3,
         3,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,3,5,0,0,0,0,0,0,0,5,3,
         3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3,0,3,3,3,3,3,
         3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,3,
@@ -107,6 +107,24 @@
         { "id": 6, "name": "spawn", "type": "", "point": true, "x": 848, "y": 528, "width": 0, "height": 0, "rotation": 0, "visible": true },
         { "id": 7, "name": "spawn", "type": "", "point": true, "x": 304, "y": 720, "width": 0, "height": 0, "rotation": 0, "visible": true },
         { "id": 8, "name": "spawn", "type": "", "point": true, "x": 560, "y": 720, "width": 0, "height": 0, "rotation": 0, "visible": true }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "zones",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        { "id": 9, "name": "Sala 1", "type": "", "x": 32, "y": 32, "width": 320, "height": 256, "rotation": 0, "visible": true,
+          "properties": [{ "name": "id", "type": "string", "value": "sala-1" }, { "name": "kind", "type": "string", "value": "meeting" }] },
+        { "id": 10, "name": "Sala 2", "type": "", "x": 384, "y": 32, "width": 320, "height": 256, "rotation": 0, "visible": true,
+          "properties": [{ "name": "id", "type": "string", "value": "sala-2" }, { "name": "kind", "type": "string", "value": "meeting" }] },
+        { "id": 11, "name": "Cabine", "type": "", "x": 736, "y": 32, "width": 192, "height": 256, "rotation": 0, "visible": true,
+          "properties": [{ "name": "id", "type": "string", "value": "cabine" }, { "name": "kind", "type": "string", "value": "private" }] }
       ]
     }
   ],

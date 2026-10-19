@@ -76,17 +76,21 @@ type Input struct {
 
 // Delta is the outcome of a Step. Moved holds players whose position or
 // direction changed, sorted by ID; Acks holds the new ack of every player
-// that consumed an input; Nearby holds the sorted near set of every player
+// that consumed an input; Zones holds the zone ID, "" outside, of every
+// player that changed zone; Nearby holds the sorted near set of every player
 // whose set changed since the previous Step.
 type Delta struct {
 	Tick   uint64
 	Moved  []Player
 	Acks   map[string]uint32
+	Zones  map[string]string
 	Nearby map[string][]string
 }
 
 type player struct {
 	Player
+	// zone is the index in the map's zones, -1 outside.
+	zone    int
 	queue   []Input
 	lastSeq uint32
 	// nextStep is zero while the player is idle, so the next step starts a
@@ -131,7 +135,8 @@ func NewSpace(m *tilemap.Map) *Space {
 // for a new connection while keeping its position and near set. The new
 // connection is expected to read Nearby, so a pending change to that set is
 // not reported again by Step. A new player's near set is computed by the
-// next Step.
+// next Step; its zone is set at once and, like a kept one, never reported in
+// Delta.Zones, since the new connection reads it with Zone.
 func (s *Space) Join(id, name string) Player {
 	if p, ok := s.players[id]; ok {
 		p.Name = name
@@ -149,6 +154,7 @@ func (s *Space) Join(id, name string) Player {
 		p.Pos = s.m.Spawns[s.nextSpawn%len(s.m.Spawns)]
 		s.nextSpawn++
 	}
+	p.zone = s.m.ZoneAt(p.Pos)
 	s.players[id] = p
 	s.nearPending[id] = struct{}{}
 	return p.Player
@@ -225,6 +231,13 @@ func (s *Space) Step(now time.Time) Delta {
 		}
 		if p.Pos != before.Pos {
 			check = append(check, p.ID)
+			if z := s.m.ZoneAt(p.Pos); z != p.zone {
+				p.zone = z
+				if d.Zones == nil {
+					d.Zones = make(map[string]string)
+				}
+				d.Zones[p.ID] = s.zoneID(z)
+			}
 		}
 		if d.Acks == nil {
 			d.Acks = make(map[string]uint32)
@@ -232,7 +245,7 @@ func (s *Space) Step(now time.Time) Delta {
 		d.Acks[p.ID] = in.Seq
 	}
 	slices.SortFunc(d.Moved, byID)
-	d.Nearby = s.stepNear(check)
+	d.Nearby = s.stepNear(check, d.Zones)
 	return d
 }
 
@@ -246,6 +259,23 @@ func (p *player) stepBase(now time.Time) time.Time {
 		return earliest
 	}
 	return p.nextStep
+}
+
+// Zone returns the zone id is in; false outside every zone or when id is
+// not in the space.
+func (s *Space) Zone(id string) (tilemap.Zone, bool) {
+	p, ok := s.players[id]
+	if !ok || p.zone < 0 {
+		return tilemap.Zone{}, false
+	}
+	return s.m.Zones[p.zone], true
+}
+
+func (s *Space) zoneID(z int) string {
+	if z < 0 {
+		return ""
+	}
+	return s.m.Zones[z].ID
 }
 
 func (s *Space) Players() []Player {

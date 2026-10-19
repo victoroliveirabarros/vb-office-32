@@ -1,4 +1,4 @@
-import type { DeviceError, DeviceState, LinkState, MediaControls, MediaView } from '../media/client'
+import type { DeviceError, DeviceState, LinkState, MediaControls, MediaView, ScreenError, ScreenState } from '../media/client'
 import { requireElement } from './dom'
 
 const LINK_TEXT: Record<LinkState, string> = {
@@ -25,6 +25,14 @@ const CAMERA_ERROR: Record<DeviceError, string> = {
   other: 'Falha ao abrir a câmera',
 }
 
+const SCREEN_ERROR: Record<ScreenError, string> = {
+  denied: 'Compartilhamento de tela bloqueado',
+  'not-found': 'Nenhuma tela disponível',
+  'in-use': 'Tela em uso por outro app',
+  other: 'Falha ao compartilhar a tela',
+  taken: 'Outra pessoa da sala começou a compartilhar antes',
+}
+
 const SELF = ''
 
 export type BoundMediaView = MediaView & { bind(controls: MediaControls): void }
@@ -33,15 +41,20 @@ export function createMediaView(): BoundMediaView {
   const bar = requireElement('media-bar', HTMLDivElement)
   const micButton = requireElement('media-mic', HTMLButtonElement)
   const cameraButton = requireElement('media-camera', HTMLButtonElement)
+  const screenButtonEl = requireElement('media-screen', HTMLButtonElement)
   const unlockButton = requireElement('media-unlock', HTMLButtonElement)
   const note = requireElement('media-note', HTMLSpanElement)
   const tiles = requireElement('media-tiles', HTMLDivElement)
   const audio = requireElement('media-audio', HTMLDivElement)
+  const stage = requireElement('media-stage', HTMLDivElement)
+  const stageLabel = requireElement('media-stage-label', HTMLSpanElement)
   const tileById = new Map<string, HTMLElement>()
+  let stageId: string | null = null
 
   let link: LinkState = 'idle'
   let mic: DeviceState = { on: false, busy: false, error: null }
   let camera: DeviceState = { on: false, busy: false, error: null }
+  let screen: ScreenState = { on: false, busy: false, error: null, meeting: false, taken: false }
 
   const render = () => {
     bar.hidden = link === 'idle'
@@ -49,9 +62,25 @@ export function createMediaView(): BoundMediaView {
     const stopped = link === 'stopped'
     renderButton(micButton, mic, stopped, 'microfone')
     renderButton(cameraButton, camera, stopped, 'câmera')
+    const share = screenButton(screen, link)
+    screenButtonEl.hidden = share.hidden
+    screenButtonEl.disabled = share.disabled
+    screenButtonEl.textContent = share.text
+    screenButtonEl.title = share.title
+    screenButtonEl.setAttribute('aria-pressed', String(screen.on))
     note.textContent =
-      LINK_TEXT[link] || (mic.error && MIC_ERROR[mic.error]) || (camera.error && CAMERA_ERROR[camera.error]) || ''
+      LINK_TEXT[link] ||
+      (mic.error && MIC_ERROR[mic.error]) ||
+      (camera.error && CAMERA_ERROR[camera.error]) ||
+      (screen.error && SCREEN_ERROR[screen.error]) ||
+      ''
     note.hidden = note.textContent === ''
+  }
+
+  const hideScreen = () => {
+    stage.querySelector('video')?.remove()
+    stage.hidden = true
+    stageId = null
   }
 
   const removeTile = (id: string) => {
@@ -77,6 +106,7 @@ export function createMediaView(): BoundMediaView {
     bind(controls) {
       micButton.addEventListener('click', () => controls.toggleMic())
       cameraButton.addEventListener('click', () => controls.toggleCamera())
+      screenButtonEl.addEventListener('click', () => controls.toggleScreen())
       unlockButton.addEventListener('click', () => controls.startAudio())
     },
     setLink(state) {
@@ -91,6 +121,10 @@ export function createMediaView(): BoundMediaView {
       camera = state
       render()
     },
+    setScreen(state) {
+      screen = state
+      render()
+    },
     setPlaybackBlocked(blocked) {
       unlockButton.hidden = !blocked
     },
@@ -103,8 +137,19 @@ export function createMediaView(): BoundMediaView {
       if (el) addTile(SELF, 'Você', el)
       else removeTile(SELF)
     },
+    showScreen(identity, name, el) {
+      hideScreen()
+      stage.prepend(el)
+      stageLabel.textContent = `Tela de ${name}`
+      stage.hidden = false
+      stageId = identity
+    },
+    hideScreen(identity) {
+      if (identity === stageId) hideScreen()
+    },
     clear() {
       for (const id of [...tileById.keys()]) removeTile(id)
+      hideScreen()
       audio.replaceChildren()
     },
   }
@@ -120,6 +165,23 @@ export function deviceButton(state: DeviceState, stopped: boolean, device: strin
     disabled: state.busy || stopped,
     error: state.error !== null,
     label: `${on ? 'Desligar' : 'Ligar'} ${device}`,
+  }
+}
+
+export type ShareButton = { hidden: boolean; disabled: boolean; text: string; title: string }
+
+// The share button shows only in a meeting room, or while sharing so it can
+// always be stopped.
+export function screenButton(state: ScreenState, link: LinkState): ShareButton {
+  const stopped = link === 'stopped'
+  if (state.on && !stopped) return { hidden: false, disabled: state.busy, text: 'Parar', title: 'Parar de compartilhar a tela' }
+  const hidden = !state.meeting || stopped
+  if (state.taken) return { hidden, disabled: true, text: 'Compartilhar tela', title: 'Alguém da sala já está compartilhando' }
+  return {
+    hidden,
+    disabled: state.busy || link !== 'connected',
+    text: 'Compartilhar tela',
+    title: 'Compartilhar tela com quem está na sala',
   }
 }
 

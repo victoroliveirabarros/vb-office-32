@@ -1,8 +1,11 @@
 import Phaser from 'phaser'
 import type { TypingGate } from '../chat/keys'
+import { Names } from '../chat/names'
 import { Avatar } from '../entities/Avatar'
 import { Grid } from '../game/grid'
 import { Predictor, correctionFor } from '../game/prediction'
+import { ZoneMap } from '../game/zones'
+import type { MapZone } from '../game/zones'
 import type { Connection } from '../net/connection'
 import type { Dir, Player, Pos, ServerMessage, State, Welcome } from '../net/protocol'
 import type { Hud } from '../ui/hud'
@@ -17,10 +20,26 @@ export type SpeakingSource = {
   onSpeaking(fn: (ids: ReadonlySet<string>) => void): () => void
 }
 
+export type SceneHooks = {
+  speakers?: SpeakingSource
+  /** The map's zones, once loaded. */
+  zonesLoaded?(zones: ZoneMap): void
+  /** Someone else's avatar was clicked. */
+  picked?(id: string): void
+}
+
+const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x7fa3d9, private: 0xc79be8 }
+
+type ZoneView = { zone: MapZone; parts: Phaser.GameObjects.Graphics[] }
+
 export class OfficeScene extends Phaser.Scene implements TypingGate {
   private grid!: Grid
   private keys!: DirKeys
   private readonly avatars = new Map<string, Avatar>()
+  private readonly names = new Map<string, string>()
+  private labels = new Names([])
+  private zoneViews: ZoneView[] = []
+  private zoneId = ''
   private selfId: string | null = null
   private predictor: Predictor | null = null
   private stepMs = DEFAULT_STEP_MS
@@ -31,7 +50,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   constructor(
     private readonly connection: Connection,
     private readonly hud: Hud,
-    private readonly speakers?: SpeakingSource,
+    private readonly hooks: SceneHooks = {},
   ) {
     super('office')
   }
@@ -40,11 +59,14 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const map = this.make.tilemap({ key: MAP_KEY })
     const tileset = map.addTilesetImage(TILESET_NAME, TILES_KEY)
     if (!tileset) throw new Error(`tileset "${TILESET_NAME}" missing from map`)
-    map.createLayer('floor', tileset)
-    map.createLayer('walls', tileset)
+    map.createLayer('floor', tileset)?.setDepth(0)
+    map.createLayer('walls', tileset)?.setDepth(2)
 
     const cached: { data: unknown } = this.cache.tilemap.get(MAP_KEY)
     this.grid = Grid.fromTiled(cached.data)
+    const zones = ZoneMap.fromTiled(cached.data)
+    this.drawZones(zones)
+    this.hooks.zonesLoaded?.(zones)
 
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.fitCamera()
@@ -57,7 +79,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const offStatus = this.connection.onStatus((status) => {
       if (status !== 'open') this.predictor = null
     })
-    const offSpeaking = this.speakers?.onSpeaking((ids) => this.showSpeaking(ids))
+    const offSpeaking = this.hooks.speakers?.onSpeaking((ids) => this.showSpeaking(ids))
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       offMessage()
       offStatus()
@@ -102,13 +124,18 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       case 'welcome':
         return this.onWelcome(msg.d)
       case 'joined':
-        return this.upsert(msg.d)
+        this.upsert(msg.d)
+        return this.relabel()
       case 'left':
         this.avatars.get(msg.d.id)?.destroy()
         this.avatars.delete(msg.d.id)
-        return
+        this.names.delete(msg.d.id)
+        return this.relabel()
       case 'state':
         return this.onState(msg.d)
+      case 'zone':
+        this.zoneId = msg.d.id
+        return this.highlightZone()
       case 'pong':
         return this.hud.setLatency(performance.now() - msg.d.ts)
     }
@@ -117,9 +144,11 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private onWelcome(welcome: Welcome): void {
     this.avatars.forEach((avatar) => avatar.destroy())
     this.avatars.clear()
+    this.names.clear()
     this.stepMs = welcome.stepMs
     this.selfId = welcome.selfId
     welcome.players.forEach((player) => this.upsert(player))
+    this.relabel()
 
     const self = welcome.players.find((p) => p.id === welcome.selfId)
     const avatar = this.self()
@@ -155,15 +184,52 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   }
 
   private upsert(player: Player): void {
+    this.names.set(player.id, player.name)
     const existing = this.avatars.get(player.id)
     if (existing) {
       existing.snapTo(player)
-      existing.setLabel(player.name)
       return
     }
     const avatar = new Avatar(this, player)
     avatar.setSpeaking(this.speaking.has(player.id))
-    this.avatars.set(player.id, avatar)
+    const { id } = player
+    if (id !== this.selfId) avatar.onPick(() => this.hooks.picked?.(id))
+    this.avatars.set(id, avatar)
+  }
+
+  // Repeated names get the same suffix here as in the chat.
+  private relabel(): void {
+    this.labels = new Names(this.names)
+    this.avatars.forEach((avatar, id) => avatar.setLabel(this.labels.label(id, this.names.get(id) ?? '')))
+  }
+
+  // A light tint under the furniture and a border over it, stronger for our
+  // room.
+  private drawZones(zones: ZoneMap): void {
+    this.zoneViews = zones.zones.map((zone) => {
+      const { x0, y0, x1, y1 } = zone.tiles
+      const [x, y, w, h] = [x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE]
+      const color = ZONE_COLORS[zone.kind]
+      const tint = this.add.graphics().setDepth(1).fillStyle(color, 0.12).fillRect(x, y, w, h)
+      const edge = this.add.graphics().setDepth(3).lineStyle(2, color, 0.6).strokeRect(x + 1, y + 1, w - 2, h - 2)
+      this.add
+        .text(x + 6, y + 4, zone.name, {
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: '10px',
+          color: '#ffffff',
+          stroke: '#1d1f27',
+          strokeThickness: 3,
+          resolution: 4,
+        })
+        .setAlpha(0.85)
+        .setDepth(3)
+      return { zone, parts: [tint, edge] }
+    })
+    this.highlightZone()
+  }
+
+  private highlightZone(): void {
+    for (const { zone, parts } of this.zoneViews) for (const part of parts) part.setAlpha(zone.id === this.zoneId ? 1 : 0.5)
   }
 
   private showSpeaking(ids: ReadonlySet<string>): void {
