@@ -82,8 +82,9 @@ type Room struct {
 	removing   sync.WaitGroup
 	checkEvery time.Duration
 
-	ids     *chat.IDs
-	history chat.History
+	ids      *chat.IDs
+	history  chat.History
+	everyone tokenBucket
 	// historyMsg caches the encoded chatHistory until the next everyone
 	// message.
 	historyMsg []byte
@@ -110,6 +111,7 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 
 		checkEvery: mediaCheck,
 		ids:        chat.NewIDs(),
+		everyone:   newTokenBucket(everyoneRate, everyoneBurst),
 	}
 }
 

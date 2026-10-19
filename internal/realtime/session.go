@@ -18,7 +18,7 @@ import (
 
 const (
 	maxMessageSize = 8 << 10
-	sendBuffer     = 64
+	sendBuffer     = 256
 	pingInterval   = 20 * time.Second
 	writeTimeout   = 10 * time.Second
 
@@ -60,28 +60,28 @@ type Session struct {
 	room    *Room
 	log     *slog.Logger
 
-	limiter     tokenBucket
-	chatLimiter tokenBucket
-	out         chan []byte
-	done        chan struct{}
-	ended       chan struct{}
-	closeOnce   sync.Once
-	closeWith   closeReason
+	limiter   tokenBucket
+	chats     *chatLimits
+	out       chan []byte
+	done      chan struct{}
+	ended     chan struct{}
+	closeOnce sync.Once
+	closeWith closeReason
 }
 
-func newSession(id auth.Identity, conn *websocket.Conn, room *Room, log *slog.Logger) *Session {
+func newSession(id auth.Identity, conn *websocket.Conn, room *Room, chats *chatLimits, log *slog.Logger) *Session {
 	return &Session{
-		id:          id.ID,
-		name:        id.Name,
-		expires:     id.Expires,
-		conn:        conn,
-		room:        room,
-		log:         log,
-		limiter:     newTokenBucket(messageRate, messageBurst),
-		chatLimiter: newTokenBucket(chatRate, chatBurst),
-		out:         make(chan []byte, sendBuffer),
-		done:        make(chan struct{}),
-		ended:       make(chan struct{}),
+		id:      id.ID,
+		name:    id.Name,
+		expires: id.Expires,
+		conn:    conn,
+		room:    room,
+		log:     log,
+		limiter: newTokenBucket(messageRate, messageBurst),
+		chats:   chats,
+		out:     make(chan []byte, sendBuffer),
+		done:    make(chan struct{}),
+		ended:   make(chan struct{}),
 	}
 }
 
@@ -178,7 +178,7 @@ func (s *Session) readLoop(ctx context.Context) error {
 
 // chat validates, cleans and rate-limits a chat before the room routes it,
 // so the room goroutine never spends time on text. Only a valid chat spends
-// a chat token.
+// a token of the identity's chat bucket; the room still limits everyone.
 func (s *Session) chat(ctx context.Context, m chatIn, now time.Time) (string, error) {
 	if !m.valid(s.id) {
 		return chatInvalid, nil
@@ -190,7 +190,7 @@ func (s *Session) chat(ctx context.Context, m chatIn, now time.Time) (string, er
 	case errors.Is(err, chat.ErrTooLong):
 		return chatTooLong, nil
 	}
-	if !s.chatLimiter.allow(now) {
+	if !s.chats.allow(s.id, now) {
 		return chatRateLimited, nil
 	}
 	c := sessionChat{sess: s, cid: m.CID, scope: m.Scope, text: text}

@@ -29,8 +29,16 @@ func (r *Room) handleChat(c sessionChat) {
 	if m, ok := r.members[from]; !ok || m.sess != c.sess {
 		return
 	}
+	now := time.Now()
 	var target *member
-	if c.scope == chat.Direct {
+	switch c.scope {
+	case chat.Everyone:
+		if !r.everyone.allow(now) {
+			r.log.Debug("chat rejected", "id", from, "reason", chatRateLimited)
+			c.sess.sendChatError(c.cid, chatRateLimited)
+			return
+		}
+	case chat.Direct:
 		var ok bool
 		if target, ok = r.members[c.to]; !ok {
 			r.log.Debug("chat rejected", "id", from, "reason", chatOffline)
@@ -41,7 +49,7 @@ func (r *Room) handleChat(c sessionChat) {
 
 	msg := chat.Message{
 		ID:       r.ids.Next(),
-		At:       time.Now(),
+		At:       now,
 		From:     from,
 		FromName: c.sess.name,
 		Scope:    c.scope,
