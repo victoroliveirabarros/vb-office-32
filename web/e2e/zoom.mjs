@@ -1,9 +1,11 @@
 // Development-only check of the map zoom: the default per screen, the +/−
 // buttons, the wheel (plain, Ctrl/⌘, a trackpad's stream) over the map only,
 // the + - 0 keys (not while typing), a pinch on a phone, the overview (the
-// whole office fitted and centered, beside the chat when it is open, held
-// still while the avatar walks, following again on the way back in), the
-// level surviving a reload, no CSP violations. Needs the server in guest
+// whole office fitted and centered in the map beside the sidebar, beside
+// the chat panel too when it is open, held still while the avatar walks,
+// following again on the way back in), the level surviving a reload, no CSP
+// violations. The desktop runs with the sidebar collapsed to its rail, as
+// a user who wants the most map would. Needs the server in guest
 // mode serving the app build (npm run build), then:
 //
 //   node e2e/zoom.mjs [base URL, default http://localhost:8080] [screenshot dir]
@@ -156,12 +158,12 @@ function mapBox(img) {
   return { left, top, width: right - left + 1, height: bottom - top + 1 }
 }
 
-/** The share of pixels of `b` that match `a` moved right by dx, outside `skip`. */
-function matchShifted(a, b, dx, skip) {
+/** The share of pixels of `b` that match `a` moved right by dx, outside `skip` and left of `from`. */
+function matchShifted(a, b, dx, skip, from = 0) {
   let same = 0
   let total = 0
   for (let y = 0; y < a.height; y += 3) {
-    for (let x = Math.max(0, -dx); x < a.width - Math.max(0, dx); x += 3) {
+    for (let x = Math.max(from, -dx); x < a.width - Math.max(0, dx); x += 3) {
       if (x + dx >= skip.left && x <= skip.right && y >= skip.top && y <= skip.bottom) continue
       total++
       if (!differ(a.at(x, y), b.at(x + dx, y), 24)) same++
@@ -226,7 +228,7 @@ async function open(cdp, name, [width, height], mobile = false) {
       await sleep(300)
     },
     // Over the map unless told where; modifiers: 2 is Ctrl, 4 is ⌘.
-    wheel(deltaY, modifiers = 0, at = { x: width / 3, y: height / 2 }) {
+    wheel(deltaY, modifiers = 0, at = { x: width * 0.6, y: height / 2 }) {
       return send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...at, deltaX: 0, deltaY, modifiers })
     },
     center: (id) => page.eval(`(() => { const r = document.getElementById('${id}').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`),
@@ -304,7 +306,8 @@ async function open(cdp, name, [width, height], mobile = false) {
 async function join(page, name) {
   await page.send('Page.navigate', { url: base })
   await page.until(`!document.getElementById('join').hidden`)
-  await page.eval(`(() => { const i = document.getElementById('join-name'); i.value = ${JSON.stringify(name)}; document.getElementById('join-form').requestSubmit(); return true })()`)
+  // The rail of the sidebar, with the chat open beside it.
+  await page.eval(`(() => { localStorage.setItem('vb-office-32.sidebar', JSON.stringify({ expanded: false, panel: 'chat' })); const i = document.getElementById('join-name'); i.value = ${JSON.stringify(name)}; document.getElementById('join-form').requestSubmit(); return true })()`)
   await page.until(
     `!document.getElementById('zoom').hidden && (document.getElementById('zoom-level-value').textContent !== '' || document.getElementById('zoom-level').hasAttribute('data-overview'))`,
   )
@@ -317,8 +320,10 @@ function check(name, ok, detail) {
   results.checks.push({ name, ok: Boolean(ok), ...(detail === undefined ? {} : { detail }) })
 }
 
-// The overview of a 1280×800 view: 1600×800 at 0.77, centered.
-const FIT_1280 = { left: 24, top: 92, width: 1232, height: 616 }
+// The overview of the 1216×800 map beside the 64 px rail at 1280×800:
+// 1600×800 at 0.73, centered.
+const RAIL = 64
+const FIT_1280 = { left: RAIL + 24, top: 108, width: 1168, height: 584 }
 
 async function desktop(cdp) {
   const page = await open(cdp, 'desktop', [1280, 800])
@@ -379,21 +384,22 @@ async function desktop(cdp) {
   await sleep(200)
   check('a wheel over the chat scrolls it, not the map', chatOpen && (await page.state()).level === '1×' && (await page.eval('window.__wheel')) === false)
 
-  // The chat, open by default here, covers the map's right; the overview
-  // fits beside it.
+  // The chat panel, open here, covers the map's left beside the rail; the
+  // overview fits to its right.
   await page.key('-')
   await sleep(SETTLE)
-  const panel = await page.rect('chat-panel')
-  const free = panel.x
+  const panel = await page.rect('panel')
+  const right = panel.x + panel.width
+  const free = 1280 - right
   const fit = Math.min((free - 2 * Math.min(24, free * 0.05)) / 1600, (800 - 80) / 800)
   let box = await page.box()
   check(
     'the overview fits beside the open chat',
-    near(box.width, 1600 * fit) && near(box.left, (free - 1600 * fit) / 2) && near(box.top, (800 - 800 * fit) / 2),
+    near(box.width, 1600 * fit) && near(box.left, right + (free - 1600 * fit) / 2) && near(box.top, (800 - 800 * fit) / 2),
     { box, fit, free },
   )
   await page.shot('desktop-overview-chat.png')
-  await page.click('chat-close')
+  await page.click('panel-close')
   await sleep(SETTLE + 200)
   box = await page.box()
   check('the overview fits the whole office on screen, centered', ['left', 'top', 'width', 'height'].every((k) => near(box[k], FIT_1280[k])), box)
@@ -414,9 +420,11 @@ async function desktop(cdp) {
   const after = await page.map()
   await page.step('ArrowLeft')
   const later = await page.map()
-  const avatar = { left: 640 - 160, right: 640 + 96, top: 400 - 120, bottom: 400 + 60 }
-  const followed = matchShifted(after, later, 64, avatar)
-  const still = matchShifted(after, later, 0, avatar)
+  const mid = RAIL + (1280 - RAIL) / 2
+  const avatar = { left: mid - 160, right: mid + 96, top: 400 - 120, bottom: 400 + 60 }
+  // Left of the rail is the page, not the map.
+  const followed = matchShifted(after, later, 64, avatar, RAIL)
+  const still = matchShifted(after, later, 0, avatar, RAIL)
   check('back from the overview the camera follows the avatar again', (await page.state()).level === '2×' && followed > 0.97 && still < 0.9, { followed, still })
   await page.shot('desktop-2x-following.png')
 
@@ -438,7 +446,7 @@ async function desktop(cdp) {
   await join(page, `Zoom-${run}`)
   s = await page.state()
   check('the overview survives a reload', s.level === 'overview' && s.saved === 'overview' && !s.resetOff, s)
-  await page.click('chat-close')
+  await page.click('panel-close')
   await sleep(SETTLE)
   box = await page.box()
   check('and fits as before', ['left', 'top', 'width', 'height'].every((k) => near(box[k], FIT_1280[k])), box)
@@ -455,7 +463,7 @@ async function desktop(cdp) {
   await page.eval(`(() => { document.getElementById('chat-input').value = ''; document.activeElement.blur(); return true })()`)
   await page.key('Escape')
   await sleep(100)
-  await page.click('chat-close')
+  await page.click('panel-close')
   await sleep(SETTLE)
 
   // The avatar editor holds the keyboard too.
@@ -489,9 +497,9 @@ async function desktop(cdp) {
   const wide = screens['1920×1080']
   const narrow = screens['390×844']
   check(
-    'the overview refits to the window: 1× at 1920×1080, the fit on a phone',
+    'the overview refits to the window: 1× at 1920×1080 beside the rail, the fit on a phone without it',
     wide.level === 'overview' &&
-      [wide.left, wide.top, wide.width, wide.height].every((v, i) => near(v, [160, 140, 1600, 800][i])) &&
+      [wide.left, wide.top, wide.width, wide.height].every((v, i) => near(v, [RAIL + (1920 - RAIL - 1600) / 2, 140, 1600, 800][i])) &&
       near(narrow.width, 351) &&
       near(narrow.left, 19.5) &&
       near(narrow.top, (844 - 175.5) / 2),

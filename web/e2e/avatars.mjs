@@ -164,7 +164,8 @@ async function open(cdp, name, size) {
   }
   cdp.on((msg) => {
     if (msg.sessionId !== sessionId) return
-    if (msg.method === 'Network.webSocketCreated') page.sockets.push(msg.params.url)
+    // The game's socket only; LiveKit's, with media on, is not ours.
+    if (msg.method === 'Network.webSocketCreated' && new URL(msg.params.url).pathname === '/ws') page.sockets.push(msg.params.url)
     if (msg.method === 'Network.webSocketFrameReceived') {
       try {
         page.frames.push({ at: Date.now(), ...JSON.parse(msg.params.response.payloadData) })
