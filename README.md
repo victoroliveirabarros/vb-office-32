@@ -239,13 +239,19 @@ make vet
 make lint        # golangci-lint, if installed
 make loadbot     # 50 random-walking bots for 20s against :8080
 make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -chat"   # bots also chat, reports echo latency
+make loadbot LOADBOT_FLAGS="-n 50 -duration 20s -av"     # bots join with random looks (?av=)
 
 # token, removal and reconciliation checks against a running LiveKit (make livekit)
 VB_OFFICE32_LIVEKIT_TEST_URL=http://localhost:7880 go test -run LiveKit ./internal/media ./internal/realtime
 ```
 
-The wire protocol, zones and map format are specified in
-[`specs/phase1-protocol.md`](specs/phase1-protocol.md).
+The wire protocol, zones, avatar appearance and map format are specified in
+[`specs/phase1-protocol.md`](specs/phase1-protocol.md). Each player's look
+(`Player.appearance`) is checked against the `internal/avatar` catalog,
+remembered per identity while the process lives like the last position, and
+changed with `appearance` messages (3 in a row per identity, then one every
+5 seconds); `/ws?av=<skin.hair.hairColor.shirt.pants.acc>` picks it when
+joining, and without one it is derived from the id.
 
 ## License
 
