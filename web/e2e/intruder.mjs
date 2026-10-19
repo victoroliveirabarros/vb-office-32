@@ -7,8 +7,6 @@
 // CHROME picks the browser binary and CDP_PORT the DevTools port.
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 
 const base = process.argv[2] ?? 'http://localhost:8080'
 const port = Number(process.env.CDP_PORT ?? 9333)
@@ -25,7 +23,9 @@ const run = Date.now().toString(36).slice(-5)
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const profile = mkdtempSync(join(tmpdir(), 'vb-office-32-e2e-'))
+// A short path: Chrome cannot start when its profile's socket path is too
+// long, as under a long TMPDIR.
+const profile = mkdtempSync('/tmp/vbo-')
 const chrome = spawn(
   process.env.CHROME ?? 'google-chrome',
   [
@@ -43,8 +43,11 @@ const chrome = spawn(
     '--no-default-browser-check',
     'about:blank',
   ],
-  { stdio: 'ignore' },
+  { stdio: ['ignore', 'ignore', 'pipe'] },
 )
+// Chrome's stderr, shown when the run fails.
+let chromeLog = ''
+chrome.stderr.on('data', (chunk) => (chromeLog = (chromeLog + chunk).slice(-20_000)))
 
 class CDP {
   #id = 0
@@ -123,6 +126,17 @@ function check(name, ok, detail) {
   results.checks.push({ name, ok: Boolean(ok), detail })
 }
 const firstAfter = (list, at, pred = () => true) => list.find((e) => e.at >= at && pred(e))
+
+// growth lists the samples where any inbound stream received more bytes than
+// in the sample before.
+function growth(samples) {
+  const grew = []
+  for (let i = 1; i < samples.length; i++) {
+    const prev = samples[i - 1].streams
+    if (Object.entries(samples[i].streams).some(([id, bytes]) => bytes > (prev[id] ?? 0))) grew.push(samples[i].at)
+  }
+  return grew
+}
 
 async function scenario(cdp) {
   const ana = await open(cdp, 'honest', 'Ana')
@@ -206,17 +220,18 @@ async function scenario(cdp) {
   const eveOut = firstAfter(await eve.events('zone'), leaveAt, (e) => e.id === '')
   const unsubs = (await eve.events('unsubscribed')).filter((e) => e.at >= leaveAt && e.identity === anaId)
   results.latencies.intruderLeave = Object.fromEntries(unsubs.map((e) => [e.source, e.at - eveOut.at]))
-  // Media stops when the bytes stop growing, before the SDK tears the tracks down.
+  // Media stops when the bytes stop growing, before the SDK tears the tracks
+  // down; the samples go on for 3 s after leaving.
   const samples = await eve.eval('window.samples')
-  let lastGrowth = null
-  for (let i = 1; i < samples.length; i++) {
-    if (samples[i].video > samples[i - 1].video || samples[i].audio > samples[i - 1].audio) lastGrowth = samples[i].at
-  }
+  const grew = growth(samples)
+  const lastGrowth = grew.at(-1) ?? null
   results.latencies.intruderLeave.lastMedia = lastGrowth === null ? null : lastGrowth - eveOut.at
-  const before = await eve.eval('e2e.inbound()')
-  await sleep(2_000)
-  const after = await eve.eval('e2e.inbound()')
-  check('intruder back at the door stops receiving', after.audio <= before.audio && after.video <= before.video, { before, after })
+  const quietFrom = samples.at(-1).at - 1_500
+  check(
+    'intruder back at the door stops receiving',
+    grew.length > 0 && grew.every((at) => at < quietFrom) && samples.filter((s) => s.at >= quietFrom).length >= 10,
+    { lastMedia: results.latencies.intruderLeave.lastMedia, samples: samples.length },
+  )
 
   if (sharing) {
     const outAt = Date.now()
@@ -243,4 +258,5 @@ try {
   rmSync(profile, { recursive: true, force: true })
 }
 console.log(JSON.stringify(results, null, 2))
+if (failed && chromeLog) console.error(`Chrome stderr:\n${chromeLog}`)
 process.exit(failed ? 1 : 0)

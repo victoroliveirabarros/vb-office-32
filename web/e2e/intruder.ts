@@ -14,6 +14,8 @@ import type { Dir, Media, ServerMessage } from '../src/net/protocol'
 
 type Logged = { at: number; type: string; [key: string]: unknown }
 
+type Inbound = { audio: number; video: number; streams: Record<string, number> }
+
 type Harness = {
   role: string
   selfId: string | null
@@ -24,11 +26,12 @@ type Harness = {
   screen: ScreenState | null
   events: Logged[]
   walkTo(x: number, y: number): Promise<Tile | null>
-  inbound(): Promise<{ audio: number; video: number }>
+  // inbound totals the bytes received; streams has them per inbound stream.
+  inbound(): Promise<Inbound>
   // video lists each incoming video stream.
   video(): Promise<{ id: string; bytes: number; width: number; height: number; fps: number }[]>
   // sample reads inbound() every 50 ms for ms milliseconds.
-  sample(ms: number): Promise<{ at: number; audio: number; video: number }[]>
+  sample(ms: number): Promise<(Inbound & { at: number })[]>
   // The intruder's view of what others publish, permitted or not.
   publications(): { identity: string; source: string; permission: string; subscribed: boolean }[]
   toggleCamera(): void
@@ -157,15 +160,18 @@ async function walkTo(x: number, y: number): Promise<Tile | null> {
   return harness.pos
 }
 
-async function inbound(): Promise<{ audio: number; video: number }> {
-  const total = { audio: 0, video: 0 }
-  for (const pc of peers) {
+// A stream's stats vanish once it is unsubscribed, so totals can shrink;
+// growth is told per stream.
+async function inbound(): Promise<Inbound> {
+  const total: Inbound = { audio: 0, video: 0, streams: {} }
+  for (const [i, pc] of peers.entries()) {
     if (pc.connectionState === 'closed') continue
     const stats = await pc.getStats()
-    stats.forEach((s: { type?: string; kind?: string; bytesReceived?: number }) => {
+    stats.forEach((s: { type?: string; kind?: string; id?: string; bytesReceived?: number }) => {
       if (s.type !== 'inbound-rtp' || typeof s.bytesReceived !== 'number') return
       if (s.kind === 'audio') total.audio += s.bytesReceived
       else if (s.kind === 'video') total.video += s.bytesReceived
+      total.streams[`${i}/${s.id ?? ''}`] = s.bytesReceived
     })
   }
   return total
@@ -186,8 +192,8 @@ async function video(): Promise<{ id: string; bytes: number; width: number; heig
   return list
 }
 
-async function sample(ms: number): Promise<{ at: number; audio: number; video: number }[]> {
-  const samples: { at: number; audio: number; video: number }[] = []
+async function sample(ms: number): Promise<(Inbound & { at: number })[]> {
+  const samples: (Inbound & { at: number })[] = []
   for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) samples.push({ at: Date.now(), ...(await inbound()) })
   return samples
 }
