@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"reflect"
@@ -147,12 +148,19 @@ func TestPlanErrors(t *testing.T) {
 		{"lone chair", []edit{{"decor", 12, 17, 'c'}}},
 		{"chair on a desk", []edit{{"decor", 18, 15, 'c'}}},
 		{"lone wooden chair", []edit{{"decor", 12, 17, 'h'}}},
-		{"one-row desk", []edit{{"solid", 14, 15, '.'}, {"solid", 15, 15, '.'}, {"decor", 15, 15, '.'}, {"decor", 14, 15, '.'}}},
-		{"three-row desk", []edit{
-			{"solid", 14, 16, 'D'}, {"solid", 15, 16, 'D'}, {"solid", 16, 16, 'D'},
-			{"solid", 17, 16, 'D'}, {"solid", 18, 16, 'D'}, {"solid", 19, 16, 'D'},
-			{"decor", 17, 16, '.'}, {"decor", 19, 16, '.'},
+		{"one-row desk", []edit{
+			{"solid", 15, 15, '.'}, {"solid", 16, 15, '.'}, {"solid", 17, 15, '.'},
+			{"decor", 15, 15, '.'}, {"decor", 16, 15, '.'}, {"decor", 17, 15, '.'}, {"decor", 16, 16, '.'},
 		}},
+		{"three-row desk", []edit{
+			{"solid", 15, 16, 'D'}, {"solid", 16, 16, 'D'}, {"solid", 17, 16, 'D'}, {"decor", 16, 16, '.'},
+		}},
+		{"desk off the stations", []edit{{"solid", 24, 14, 'D'}, {"solid", 24, 15, 'D'}}},
+		{"cubicles carpet off the stations", []edit{{"floor", 24, 13, 'u'}}},
+		{"one-row cubicles carpet", []edit{{"floor", 12, 11, 'u'}, {"floor", 13, 11, 'u'}, {"floor", 14, 11, 'u'}}},
+		{"one-tile dual monitor", []edit{{"decor", 15, 14, 'd'}}},
+		{"aquarium on the floor", []edit{{"decor", 12, 17, 'f'}, {"decor", 13, 17, 'f'}}},
+		{"picture on glass", []edit{{"decor", 13, 9, 'q'}}},
 		{"papers on the floor", []edit{{"decor", 12, 17, 'n'}}},
 		{"desk plant on a table", []edit{{"decor", 32, 21, 'p'}}},
 		{"monitor on the floor", []edit{{"decor", 12, 17, 'm'}}},
@@ -161,7 +169,7 @@ func TestPlanErrors(t *testing.T) {
 		{"lone wall", []edit{{"floor", 5, 21, ','}, {"solid", 5, 21, '#'}}},
 		{"one-tile table", []edit{{"solid", 12, 17, 'T'}}},
 		{"three-tile sofa", []edit{{"solid", 36, 3, 'S'}}},
-		{"ring off a grey carpet", []edit{{"floor", 12, 17, 'b'}}},
+		{"ring off the rubber", []edit{{"floor", 12, 17, 'b'}}},
 		{"ring post off a corner", []edit{{"solid", 44, 13, 'R'}}},
 		{"ropes off an edge", []edit{{"decor", 44, 13, 'o'}}},
 	}
@@ -184,6 +192,7 @@ func TestPlanErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("plan accepted, want error")
 			}
+			t.Log(err)
 		})
 	}
 
@@ -200,13 +209,53 @@ func TestParseSprite(t *testing.T) {
 	if _, err := parseSprite([]byte(ok)); err != nil {
 		t.Fatal(err)
 	}
+	img, err := parseSprite([]byte(". 40404080\n\n" + strings.Repeat(row, 16)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.At(0, 0); got != (color.NRGBA{0x40, 0x40, 0x40, 0x80}) {
+		t.Errorf("see-through color = %v", got)
+	}
 	for _, bad := range []string{
 		". transparent\n\n" + strings.Repeat(row, 15),
+		". 4040408\n\n" + strings.Repeat(row, 16),
 		". transparent\n\n" + strings.Repeat(row, 15) + strings.Repeat("x", 16) + "\n",
 		". 40404\n\n" + strings.Repeat(row, 16),
 	} {
 		if _, err := parseSprite([]byte(bad)); err == nil {
 			t.Errorf("parseSprite succeeded, want error for %.40q", bad)
 		}
+	}
+}
+
+func TestPaint(t *testing.T) {
+	a, err := loadArt(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wall := Entry{Name: "front", Source: rpg(13, 15)}
+	plain, err := a.entryImage(wall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &Paint{"test", map[string]string{"d9caa9": "112233", "123456": "ffffff"}}
+	a.paints[p] = map[color.NRGBA]color.NRGBA{
+		{0xd9, 0xca, 0xa9, 0xff}: {0x11, 0x22, 0x33, 0xff},
+		{0x12, 0x34, 0x56, 0xff}: {0xff, 0xff, 0xff, 0xff},
+	}
+	a.painted[p] = make(map[color.NRGBA]bool)
+	wall.Paint = p
+	painted, err := a.entryImage(wall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.At(0, 0) != (color.NRGBA{0xd9, 0xca, 0xa9, 0xff}) || painted.At(0, 0) != (color.NRGBA{0x11, 0x22, 0x33, 0xff}) {
+		t.Errorf("pixel 0,0 = %v painted %v", plain.At(0, 0), painted.At(0, 0))
+	}
+	if painted.At(0, 15) != plain.At(0, 15) {
+		t.Errorf("unmapped pixel changed: %v, was %v", painted.At(0, 15), plain.At(0, 15))
+	}
+	if err := a.unusedPaint(); err == nil || !strings.Contains(err.Error(), "paint test: no tile has 123456") {
+		t.Errorf("unusedPaint = %v, want the unused color", err)
 	}
 }

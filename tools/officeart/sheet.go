@@ -24,6 +24,7 @@ var glyphs = map[rune][5]string{
 	'8': {"111", "101", "111", "101", "111"},
 	'9': {"111", "101", "111", "001", "111"},
 	',': {"000", "000", "000", "010", "100"},
+	'*': {"000", "101", "010", "101", "000"},
 	'#': {"101", "111", "101", "111", "101"},
 	'r': {"000", "110", "100", "100", "100"},
 	'i': {"010", "000", "010", "010", "010"},
@@ -45,7 +46,7 @@ func label(img draw.Image, x, y, s int, text string, c color.Color) {
 }
 
 // writeSheets writes index.png, every atlas tile at 4× with its gid and
-// source tile (r rpg, i indoor, c custom), index.txt with the same in words,
+// source tile (r rpg, i indoor, c custom; * when painted), index.txt with the same in words,
 // and map.png, the map as the game draws it.
 func writeSheets(dir string, out *output) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -62,7 +63,7 @@ func writeSheets(dir string, out *output) error {
 	draw.Draw(index, index.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
 	var text strings.Builder
 	for i, e := range manifest {
-		src, err := out.art.tileImage(e.Source)
+		src, err := out.art.entryImage(e)
 		if err != nil {
 			return err
 		}
@@ -79,8 +80,13 @@ func writeSheets(dir string, out *output) error {
 		draw.Draw(index, image.Rect(ox, oy, ox+srcTile*zoom, oy+srcTile*zoom), scaled(src, zoom), image.Point{}, draw.Over)
 		sheet := e.Sheet[:1]
 		label(index, ox, oy+srcTile*zoom+4, 2, fmt.Sprintf("#%d", i+1), color.NRGBA{170, 0, 0, 255})
+		paint := ""
+		if e.Paint != nil {
+			paint = " paint " + e.Paint.Name
+			sheet += "*"
+		}
 		label(index, ox, oy+srcTile*zoom+18, 2, fmt.Sprintf("%s%d,%d", sheet, e.Col, e.Row), color.NRGBA{0, 0, 170, 255})
-		fmt.Fprintf(&text, "%3d  %-16s %s %d,%d\n", i+1, e.Name, e.Sheet, e.Col, e.Row)
+		fmt.Fprintf(&text, "%3d  %-18s %s %d,%d%s\n", i+1, e.Name, e.Sheet, e.Col, e.Row, paint)
 	}
 	if err := writePNG(filepath.Join(dir, "index.png"), index); err != nil {
 		return err

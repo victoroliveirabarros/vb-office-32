@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -10,6 +11,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -38,12 +40,39 @@ type Source struct {
 	Col, Row int
 }
 
+// Paint recolors the tiles it is set on: each "rrggbb" color in Map becomes
+// the other, any other color stays as drawn. Every color it maps must occur
+// in at least one of its tiles, so a sheet that changes cannot leave a stale
+// entry behind unnoticed.
+type Paint struct {
+	Name string
+	Map  map[string]string
+}
+
+func hexColor(s string) (color.NRGBA, error) {
+	v, err := strconv.ParseUint(s, 16, 32)
+	if err != nil || len(s) != 6 && len(s) != 8 {
+		return color.NRGBA{}, fmt.Errorf("color %q", s)
+	}
+	if len(s) == 6 {
+		v = v<<8 | 0xff
+	}
+	return color.NRGBA{uint8(v >> 24), uint8(v >> 16), uint8(v >> 8), uint8(v)}, nil
+}
+
 type art struct {
 	sheets map[string]image.Image
+	paints map[*Paint]map[color.NRGBA]color.NRGBA
+	// painted holds the source colors each paint met.
+	painted map[*Paint]map[color.NRGBA]bool
 }
 
 func loadArt(root string) (*art, error) {
-	a := &art{sheets: make(map[string]image.Image)}
+	a := &art{
+		sheets:  make(map[string]image.Image),
+		paints:  make(map[*Paint]map[color.NRGBA]color.NRGBA),
+		painted: make(map[*Paint]map[color.NRGBA]bool),
+	}
 	for name, rel := range sheetFiles {
 		img, err := readPNG(filepath.Join(root, rel))
 		if err != nil {
@@ -67,7 +96,66 @@ func loadArt(root string) (*art, error) {
 		}
 		a.sheets[s.Sheet] = img
 	}
+	for _, e := range manifest {
+		if e.Paint == nil || a.paints[e.Paint] != nil {
+			continue
+		}
+		m := make(map[color.NRGBA]color.NRGBA, len(e.Paint.Map))
+		for from, to := range e.Paint.Map {
+			f, err := hexColor(from)
+			if err != nil || len(from) != 6 {
+				return nil, fmt.Errorf("paint %s: source color %q", e.Paint.Name, from)
+			}
+			t, err := hexColor(to)
+			if err != nil {
+				return nil, fmt.Errorf("paint %s: %w", e.Paint.Name, err)
+			}
+			m[f] = t
+		}
+		a.paints[e.Paint] = m
+		a.painted[e.Paint] = make(map[color.NRGBA]bool)
+	}
 	return a, nil
+}
+
+// entryImage returns the 16 px tile of e, painted.
+func (a *art) entryImage(e Entry) (*image.NRGBA, error) {
+	img, err := a.tileImage(e.Source)
+	if err != nil || e.Paint == nil {
+		return img, err
+	}
+	m, seen := a.paints[e.Paint], a.painted[e.Paint]
+	for y := range srcTile {
+		for x := range srcTile {
+			c := img.NRGBAAt(x, y)
+			if c.A != 255 {
+				continue
+			}
+			if to, ok := m[c]; ok {
+				img.SetNRGBA(x, y, to)
+				seen[c] = true
+			}
+		}
+	}
+	return img, nil
+}
+
+// unusedPaint reports the colors of a paint that none of its tiles has.
+func (a *art) unusedPaint() error {
+	var errs []error
+	for p, m := range a.paints {
+		var missing []string
+		for from := range m {
+			if !a.painted[p][from] {
+				missing = append(missing, fmt.Sprintf("%02x%02x%02x", from.R, from.G, from.B))
+			}
+		}
+		if len(missing) > 0 {
+			slices.Sort(missing)
+			errs = append(errs, fmt.Errorf("paint %s: no tile has %s", p.Name, strings.Join(missing, ", ")))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func readPNG(path string) (image.Image, error) {
@@ -84,7 +172,7 @@ func readPNG(path string) (image.Image, error) {
 }
 
 // tileImage returns the 16 px tile s points at.
-func (a *art) tileImage(s Source) (image.Image, error) {
+func (a *art) tileImage(s Source) (*image.NRGBA, error) {
 	img, ok := a.sheets[s.Sheet]
 	if !ok {
 		return nil, fmt.Errorf("unknown sheet %q", s.Sheet)
@@ -104,13 +192,13 @@ func (a *art) tileImage(s Source) (image.Image, error) {
 
 // buildAtlas scales each tile 2× with nearest neighbour and extrudes it by
 // 1 px, so that sampling at a tile's edge never reads its neighbour.
-func (a *art) buildAtlas(tiles []Source) (*image.NRGBA, error) {
+func (a *art) buildAtlas(tiles []Entry) (*image.NRGBA, error) {
 	rows := (len(tiles) + atlasColumn - 1) / atlasColumn
 	atlas := image.NewNRGBA(image.Rect(0, 0, atlasColumn*cell, rows*cell))
-	for i, s := range tiles {
-		src, err := a.tileImage(s)
+	for i, e := range tiles {
+		src, err := a.entryImage(e)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", e.Name, err)
 		}
 		ox, oy := i%atlasColumn*cell, i/atlasColumn*cell
 		for y := -1; y <= tile; y++ {
@@ -124,8 +212,8 @@ func (a *art) buildAtlas(tiles []Source) (*image.NRGBA, error) {
 	return atlas, nil
 }
 
-// parseSprite reads a sprite drawn as text: palette lines "<char> <rrggbb>"
-// or "<char> transparent", a blank line, then one line per pixel row. Lines
+// parseSprite reads a sprite drawn as text: palette lines "<char> <rrggbb>",
+// "<char> <rrggbbaa>" for a see-through color or "<char> transparent", a blank line, then one line per pixel row. Lines
 // starting with # are comments. Its size must be a multiple of 16.
 func parseSprite(b []byte) (image.Image, error) {
 	palette := make(map[byte]color.NRGBA)
@@ -147,11 +235,11 @@ func parseSprite(b []byte) (image.Image, error) {
 				palette[key[0]] = color.NRGBA{}
 				continue
 			}
-			v, err := strconv.ParseUint(value, 16, 32)
-			if err != nil || len(value) != 6 {
-				return nil, fmt.Errorf("palette color %q", value)
+			c, err := hexColor(value)
+			if err != nil {
+				return nil, fmt.Errorf("palette %w", err)
 			}
-			palette[key[0]] = color.NRGBA{uint8(v >> 16), uint8(v >> 8), uint8(v), 255}
+			palette[key[0]] = c
 		case line != "":
 			rows = append(rows, line)
 		}

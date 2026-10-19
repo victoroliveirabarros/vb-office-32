@@ -1,0 +1,30 @@
+# Floors (48x16): office carpet tiles laid in alternating directions,
+# large porcelain tiles for the kitchen and rubber for the ring room.
+# CC0 1.0, vb-office-32.
+a aeadba
+b a7a6b4
+A e3e6ea
+G cfd3da
+L eceef1
+D dee1e6
+r 4b505d
+R 5a606f
+k 41454f
+S 3f434d
+
+aaaaaaaaababababLLLLLLLLLLLLLLLGrrrrrrrkrrrRRkrS
+bbbbbbbbababababLAAAAAAAAAAAAADGrrrrrRrkrkrrrrrS
+aaaaaaaaababababLAAAAAAAAAAAAADGrrrRrrrrrrrrrrrS
+bbbbbbbbababababLAAAAAAAALAAAADGrrrrrkrrrrrrrRRS
+aaaaaaaaababababLAAAAAAALLAAAADGrrrRrrrrrkrkrkrS
+bbbbbbbbababababLAAAAAALLAAAAADGrkrrrrrrRrrrrrrS
+aaaaaaaaababababLAAAAALLAAAAAADGRrrrrrrrrrrrrrrS
+bbbbbbbbababababLAAAALLAAAAAAADGRrRrrrrrrrrrrrRS
+ababababaaaaaaaaLAAALLAAAAAAAADGRrkrrrrrrrrrrrrS
+ababababbbbbbbbbLAAALAAAAAAAAADGrrrrrRrrrRrrrrrS
+ababababaaaaaaaaLAAAAAAAAAAAAADGrrrrrrrrrrrrrrrS
+ababababbbbbbbbbLAAAAAAAAAAAAADGrRrrkrrrRrrrrrrS
+ababababaaaaaaaaLAAAAAAAAAAAAADGrrrrrrrrrrrkRrrS
+ababababbbbbbbbbLAAAAAAAAAAAAADGrrrrrrrrrrrrrRrS
+ababababaaaaaaaaLDDDDDDDDDDDDDDGkkrrrrrrrrrrrrrS
+ababababbbbbbbbbGGGGGGGGGGGGGGGGSSSSSSSSSSSSSSSS

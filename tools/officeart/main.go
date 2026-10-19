@@ -58,12 +58,11 @@ func generate(root string) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	sources := make([]Source, len(manifest))
-	for i, e := range manifest {
-		sources[i] = e.Source
-	}
-	atlas, err := a.buildAtlas(sources)
+	atlas, err := a.buildAtlas(manifest)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.unusedPaint(); err != nil {
 		return nil, err
 	}
 	var buf bytes.Buffer

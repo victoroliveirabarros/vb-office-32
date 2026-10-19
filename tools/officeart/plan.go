@@ -18,19 +18,22 @@ type grid [mapH]string
 // Plan is the office drawn as three 50×25 character grids. ~ is outside
 // the office, in the floor and solid grids alike: no floor, blocked.
 //
-// floor: , floor  w wood  t teal, o orange, y beige and g grey carpets
-// b boxing ring canvas, inside a grey carpet.
-// solid (blocks movement): . free  # wall  T table  D office desk, two
-// rows deep with a divider between them  K counter
+// floor: , office carpet tiles  p porcelain  u cubicles carpet, in stations
+// three tiles wide  m blue (meeting) and s slate (private) carpets, y light
+// and g grey rugs  z rubber  b boxing ring canvas, on the rubber.
+// solid (blocks movement): . free  # wall  = glass partition  T table
+// D cubicle desks, two rows deep in stations three tiles wide  K counter
 // W sink  F stove  G fridge  P plant  S sofa (2 wide)  A armchair
 // E bookshelf  V TV (2 wide)  R ring post, on a corner of the canvas
 // B punching bag  N bench (2 wide).
 // decor (no collision): . nothing  c office chair and h wooden chair,
-// facing the table or desk next to it  m monitor with keyboard on a desk,
-// facing the chair next to it  n papers and mug, b books, l lamp and
-// p plant on a desk  a armchair
-// r runner, on free tiles; o ring ropes, on an edge of the canvas;
-// j window  q picture  Q panel (2 wide)  e shelf, on wall fronts.
+// facing the table or desk next to it  m monitor, k laptop and d two
+// monitors (2 wide) on a desk, showing their screens on its south row and
+// their backs on its north row  x computer, f aquarium (2 wide), n papers
+// and mug, b books, l lamp, p succulent, v potted plant and t photo frame on
+// a desk  a armchair  r runner, on free tiles; o ring ropes, on an edge of
+// the canvas; j window  q picture  Q whiteboard (2 wide)  e shelf, on solid
+// wall fronts.
 type Plan struct {
 	Floor, Solid, Decor grid
 }
@@ -120,7 +123,9 @@ func (p *Plan) layers() (*Layers, error) {
 	return &l, nil
 }
 
-var carpets = map[byte]string{'t': "carpet-teal", 'o': "carpet-orange", 'y': "carpet-beige"}
+var carpets = map[byte]string{'m': "carpet-blue", 's': "carpet-slate", 'y': "rug-light", 'g': "rug-grey"}
+
+var plainFloors = map[byte]string{',': "floor", 'p': "porcelain", 'z': "rubber"}
 
 func (p *Plan) floorTile(x, y int) (string, error) {
 	c := p.Floor.at(x, y)
@@ -130,18 +135,16 @@ func (p *Plan) floorTile(x, y int) (string, error) {
 	switch c {
 	case '~':
 		return "", nil
-	case ',':
-		return "floor", nil
-	case 'w':
-		return "wood", nil
-	case 'g':
-		// The ring stands on the carpet, which runs under it.
-		return nineSlice(&p.Floor, x, y, "carpet-grey", 'g', 'b')
+	case 'u':
+		return p.cubicleFloor(x, y)
 	case 'b':
 		if p.ringPart(x, y) == "" {
-			return "", errAt(x, y, "ring outside a grey carpet")
+			return "", errAt(x, y, "ring off the rubber floor")
 		}
 		return nineSlice(&p.Floor, x, y, "ring", 'b')
+	}
+	if name, ok := plainFloors[c]; ok {
+		return name, nil
 	}
 	if name, ok := carpets[c]; ok {
 		return nineSlice(&p.Floor, x, y, name, c)
@@ -149,13 +152,53 @@ func (p *Plan) floorTile(x, y int) (string, error) {
 	return "", errAt(x, y, "unknown floor %q", c)
 }
 
+// cubicleFloor frames each station's carpet, chairs included.
+func (p *Plan) cubicleFloor(x, y int) (string, error) {
+	n, s := p.Floor.at(x, y-1) == 'u', p.Floor.at(x, y+1) == 'u'
+	if !n && !s {
+		return "", errAt(x, y, "cubicles carpet must be at least 2 rows deep")
+	}
+	part := ""
+	switch {
+	case !n:
+		part = "n"
+	case !s:
+		part = "s"
+	}
+	col, err := station(&p.Floor, x, y)
+	if err != nil {
+		return "", err
+	}
+	if part+col == "" {
+		return "cubicle-c", nil
+	}
+	return "cubicle-" + part + col, nil
+}
+
+// station picks the part of a run of stations three tiles wide at x, y:
+// "w", "" or "e".
+func station(g *grid, x, y int) (string, error) {
+	c := g.at(x, y)
+	x0, x1 := x, x
+	for g.at(x0-1, y) == c {
+		x0--
+	}
+	for g.at(x1+1, y) == c {
+		x1++
+	}
+	if (x1-x0+1)%3 != 0 {
+		return "", errAt(x, y, "%q is %d wide, not stations of 3", c, x1-x0+1)
+	}
+	return []string{"w", "", "e"}[(x-x0)%3], nil
+}
+
 // ringPart returns the part of the ring canvas at x, y, or "" when there is
-// none or it does not stand on a grey carpet.
+// none or it does not stand on a rectangle of rubber floor.
 func (p *Plan) ringPart(x, y int) string {
 	if p.Floor.at(x, y) != 'b' {
 		return ""
 	}
-	if _, err := nineSlice(&p.Floor, x, y, "", 'g', 'b'); err != nil {
+	if _, err := nineSlice(&p.Floor, x, y, "", 'z', 'b'); err != nil {
 		return ""
 	}
 	part, err := nineSlice(&p.Floor, x, y, "", 'b')
@@ -231,19 +274,25 @@ func (p *Plan) solidTile(x, y int) (string, error) {
 	switch c {
 	case '.':
 		return "", nil
-	case '#':
+	case '#', '=':
 		return p.wallTile(x, y)
 	case 'T':
 		return run(&p.Solid, x, y, "table", 0)
 	case 'D':
-		part, err := nineSlice(&p.Solid, x, y, "desk", 'D')
+		row := ""
+		switch n, s := p.Solid.at(x, y-1) == 'D', p.Solid.at(x, y+1) == 'D'; {
+		case !n && s:
+			row = "n"
+		case n && !s:
+			row = "s"
+		default:
+			return "", errAt(x, y, "desk must be two rows deep")
+		}
+		col, err := station(&p.Solid, x, y)
 		if err != nil {
 			return "", err
 		}
-		if !strings.HasPrefix(part, "desk-n") && !strings.HasPrefix(part, "desk-s") {
-			return "", errAt(x, y, "desk must be two rows deep")
-		}
-		return part, nil
+		return "desk-" + row + col, nil
 	case 'E':
 		return run(&p.Solid, x, y, "shelf", 0)
 	case 'S':
@@ -277,19 +326,30 @@ func (p *Plan) solidTile(x, y int) (string, error) {
 	return "", errAt(x, y, "unknown solid %q", c)
 }
 
-func (p *Plan) wall(x, y int) bool { return p.Solid.at(x, y) == '#' }
+func (p *Plan) wall(x, y int) bool { c := p.Solid.at(x, y); return c == '#' || c == '=' }
+
+func (p *Plan) glass(x, y int) bool { return p.Solid.at(x, y) == '=' }
 
 // front reports a wall whose south side faces the room: it shows its face.
 func (p *Plan) front(x, y int) bool {
 	s := p.Solid.at(x, y+1)
-	return p.wall(x, y) && s != 0 && s != '#' && s != '~'
+	return p.wall(x, y) && s != 0 && !p.wall(x, y+1) && s != '~'
 }
 
 func (p *Plan) top(x, y int) bool { return p.wall(x, y) && !p.front(x, y) }
 
 // wallTile shows a front as a face, with an end next to an opening, and any
-// other wall as a top joined to the wall tops around it.
+// other wall as a top joined to the wall tops around it, glass or solid alike;
+// a glass partition's tiles are named glass-<the solid wall's>.
 func (p *Plan) wallTile(x, y int) (string, error) {
+	name, err := p.solidWallTile(x, y)
+	if err != nil || !p.glass(x, y) {
+		return name, err
+	}
+	return "glass-" + name, nil
+}
+
+func (p *Plan) solidWallTile(x, y int) (string, error) {
 	if p.front(x, y) {
 		name := "front"
 		if !p.wall(x-1, y) && x > 0 {
@@ -327,8 +387,10 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 		return "", nil
 	case strings.IndexByte("charo", c) >= 0 && s != '.':
 		return "", errAt(x, y, "%q must be on a free tile", c)
-	case strings.IndexByte("jqQe", c) >= 0 && !p.front(x, y):
-		return "", errAt(x, y, "%q must be on a wall front", c)
+	case strings.IndexByte("jqQe", c) >= 0 && (!p.front(x, y) || p.glass(x, y)):
+		return "", errAt(x, y, "%q must be on a solid wall front", c)
+	case strings.IndexByte("mkdxfnblpvt", c) >= 0 && s != 'D':
+		return "", errAt(x, y, "%q must be on a desk", c)
 	}
 	switch c {
 	case 'c':
@@ -336,11 +398,15 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 	case 'h':
 		return p.chairTile(x, y, "wood-chair")
 	case 'm':
-		return p.monitorTile(x, y)
-	case 'n', 'b', 'l', 'p':
-		if s != 'D' {
-			return "", errAt(x, y, "%q must be on a desk", c)
-		}
+		return "monitor-" + p.facing(x, y), nil
+	case 'k':
+		return "laptop-" + p.facing(x, y), nil
+	case 'd':
+		part, err := run(&p.Decor, x, y, "", 2)
+		return "dual-" + p.facing(x, y) + part, err
+	case 'f':
+		return run(&p.Decor, x, y, "aquarium", 2)
+	case 'x', 'n', 'b', 'l', 'p', 'v', 't':
 		return deskItems[c], nil
 	case 'a':
 		return "armchair", nil
@@ -351,7 +417,7 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 	case 'q':
 		return pictures[x%len(pictures)], nil
 	case 'Q':
-		return run(&p.Decor, x, y, "panel", 2)
+		return run(&p.Decor, x, y, "whiteboard", 2)
 	case 'e':
 		return "wall-shelf", nil
 	case 'o':
@@ -366,7 +432,23 @@ func (p *Plan) decorTile(x, y int) (string, error) {
 	return "", errAt(x, y, "unknown decor %q", c)
 }
 
-var deskItems = map[byte]string{'n': "desk-papers", 'b': "desk-books", 'l': "desk-lamp", 'p': "desk-plant"}
+var deskItems = map[byte]string{
+	'x': "desk-computer", 'n': "desk-papers", 'b': "desk-books", 'l': "desk-lamp",
+	'p': "desk-plant", 'v': "desk-pot", 't': "desk-photo",
+}
+
+// facing is "front" on a desk's south row, where screens face the camera
+// and the chair south of the desk, and "back" on its north row.
+func (p *Plan) facing(x, y int) string {
+	if p.Solid.at(x, y-1) == 'D' {
+		return "front"
+	}
+	return "back"
+}
+
+// cubicleChairs colors the chairs at the cubicle desks by row: light grey
+// north of the desks, navy south of them.
+var cubicleChairs = map[string]string{"s": "-light", "n": "-navy"}
 
 // chairTile turns a chair towards the table or desk next to it, preferring
 // one to the south or north.
@@ -375,26 +457,17 @@ func (p *Plan) chairTile(x, y int, prefix string) (string, error) {
 		dx, dy int
 		dir    string
 	}{{0, 1, "s"}, {0, -1, "n"}, {1, 0, "e"}, {-1, 0, "w"}} {
-		if c := p.Solid.at(x+d.dx, y+d.dy); c == 'T' || c == 'D' {
+		switch p.Solid.at(x+d.dx, y+d.dy) {
+		case 'D':
+			if prefix == "chair" {
+				return prefix + "-" + d.dir + cubicleChairs[d.dir], nil
+			}
+			return prefix + "-" + d.dir, nil
+		case 'T':
 			return prefix + "-" + d.dir, nil
 		}
 	}
 	return "", errAt(x, y, "chair without a table or desk next to it")
-}
-
-// monitorTile shows a monitor's screen when its chair is to the south, the
-// way the camera looks, and its back when the chair is to the north.
-func (p *Plan) monitorTile(x, y int) (string, error) {
-	if p.Solid.at(x, y) != 'D' {
-		return "", errAt(x, y, "monitor must be on a desk")
-	}
-	switch {
-	case p.Decor.at(x, y+1) == 'c':
-		return "monitor-front", nil
-	case p.Decor.at(x, y-1) == 'c':
-		return "monitor-back", nil
-	}
-	return "", errAt(x, y, "monitor without a chair north or south of it")
 }
 
 // gids numbers the tiles in manifest order, and fails on a name missing
