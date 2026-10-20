@@ -1,6 +1,6 @@
 import { MAX_PENDING_INPUTS } from '../net/protocol'
 import type { Dir, MoveInput } from '../net/protocol'
-import type { Facing, Grid, Tile } from './grid'
+import type { Facing, Gate, Grid, Tile } from './grid'
 
 export type Correction = 'none' | 'tween' | 'snap'
 
@@ -15,6 +15,7 @@ export class Predictor {
   private pending: MoveInput[] = []
   private authoritative: Facing
   private predicted: Facing
+  private gate: Gate | undefined
 
   constructor(
     private readonly grid: Grid,
@@ -28,6 +29,11 @@ export class Predictor {
     return this.predicted
   }
 
+  /** Mirrors the server's access rules, like the desks locked for us. */
+  setGate(gate: Gate): void {
+    this.gate = gate
+  }
+
   get pendingCount(): number {
     return this.pending.length
   }
@@ -38,14 +44,14 @@ export class Predictor {
     if (this.pending.length >= MAX_PENDING_INPUTS) return null
     const move = { seq: ++this.seq, dir }
     this.pending.push(move)
-    this.predicted = this.grid.move(this.predicted, dir)
+    this.predicted = this.grid.move(this.predicted, dir, this.gate)
     return move
   }
 
   reconcile(ack: number, server?: Facing): Facing {
     this.pending = this.pending.filter((move) => move.seq > ack)
     if (server) this.authoritative = { x: server.x, y: server.y, dir: server.dir }
-    this.predicted = this.pending.reduce((pos, move) => this.grid.move(pos, move.dir), this.authoritative)
+    this.predicted = this.pending.reduce((pos, move) => this.grid.move(pos, move.dir, this.gate), this.authoritative)
     return this.predicted
   }
 }

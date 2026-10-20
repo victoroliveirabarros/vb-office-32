@@ -64,6 +64,8 @@ type Pos        = { id: string; x: number; y: number; dir: Dir }
 | `ping` | `{ ts: number }` | Servidor responde `pong` com mesmo `ts`. |
 | `chat` | `{ cid: string, scope: Scope, to?: string, text: string }` | Ver [Chat](#chat). `cid` é do cliente, só para casar eco e erro. |
 | `appearance` | `Appearance` | Pede nova aparência. Campos ausentes = 0; chaves desconhecidas ignoradas. Ver [Aparência](#aparência). |
+| `deskInvite` | `{ target: string }` | Dono convida `target` para a própria mesa. Ver [Mesas](#mesas). |
+| `deskRevoke` | `{ target: string }` | Dono remove o convite de `target`. Ver [Mesas](#mesas). |
 
 ## Servidor → Cliente
 
@@ -75,14 +77,17 @@ type Pos        = { id: string; x: number; y: number; dir: Dir }
 | `state` | `{ tick: number, ack: number, players: Pos[] }` | Fim de tick em que houve mudança OU o `ack` do destinatário avançou. `players` = só quem mudou posição/direção no tick. `ack` = último `seq` processado do destinatário (0 se nenhum). |
 | `pong` | `{ ts: number }` | Resposta a `ping`. |
 | `media` | `{ url: string, token: string, expiresAt: number }` | Só com mídia configurada. Logo após `welcome` e reemitido a cada ~5 min (verificação a cada 1 min, então entre 5 e 6 min). `url` = URL WS do LiveKit; `token` = JWT de acesso (TTL 10 min); `expiresAt` = expiração do token em unix **ms**. |
-| `zone` | `{ id: string, name?: string, kind?: "meeting" \| "private" }` | Sempre, com ou sem mídia; só para o próprio jogador. Ao conectar (fora de zona: `{ id: "" }`) e no fim de todo tick em que o destinatário cruzou a borda de uma zona (depois do `state` e antes do `nearby` desse tick). Fora de zona só vai `id`, vazio. Ver [Zonas](#zonas). |
+| `zone` | `{ id: string, name?: string, kind?: "meeting" \| "private" \| "desk" }` | Sempre, com ou sem mídia; só para o próprio jogador. Ao conectar (fora de zona: `{ id: "" }`) e no fim de todo tick em que o destinatário cruzou a borda de uma zona (depois do `state` e antes do `nearby` desse tick). Fora de zona só vai `id`, vazio. Ver [Zonas](#zonas). |
 | `nearby` | `{ ids: string[] }` | Sempre, com ou sem mídia. Ao conectar (mesmo vazio) e no fim de todo tick em que o conjunto do destinatário mudou (depois do `state` e do `zone` desse tick, se houver). Conjunto completo de quem o destinatário ouve (ver [Proximidade](#proximidade) e [Zonas](#zonas)), ordenado, sem o próprio. |
 | `chat` | `Chat` | Mensagem de chat para o destinatário, ou eco para o remetente (com `cid`). |
 | `chatHistory` | `{ messages: Chat[] }` | Ao conectar, sempre (mesmo vazio): últimas ≤ 100 mensagens `everyone`, mais antiga primeiro, sem `cid`. |
 | `chatError` | `{ cid: string, reason: "invalid" \| "empty" \| "too_long" \| "rate_limited" \| "offline" }` | Chat recusado; só para o remetente. |
 | `appearance` | `{ id: string, appearance: Appearance }` | Resposta a todo `appearance` do cliente. Mudou → para todos (inclusive o remetente); sem mudança, fora do catálogo ou acima do limite → só para o remetente, com a aparência atual. |
+| `desks` | `{ desks: Desk[] }` | Só em mapa com mesas. Ao conectar e, para todos os outros, quando o dono de uma mesa entra, sai ou muda de nome. Ver [Mesas](#mesas). |
+| `deskGuests` | `{ desk: string, guests: { id: string, name: string, online: boolean }[] }` | Só para o dono online: ao conectar e a cada convite, revogação, entrada ou saída de convidado. `guests` ordenado por `id`. |
+| `deskInvite` | `{ desk: string, owner: string, ownerName: string, invited: boolean }` | Só para o convidado: ao ser convidado (`true`), ao perder o convite (`false`) e, ao conectar, um por convite ativo. |
 
-Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby` → `chatHistory`; só então os outros recebem `joined`. O `?av=` já vale no `welcome` e no `joined`, sem `appearance` à parte. Ordem no fim de um tick: `state` → `zone` → `nearby`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
+Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `desks` (só em mapa com mesas) → `deskGuests` (só para o dono) → `deskInvite` (um por convite ativo) → `nearby` → `chatHistory`; só então os outros recebem `joined` e, se o dono de uma mesa ficou online, `desks`. Ao sair: `left` → `desks` (se era dono). O `?av=` já vale no `welcome` e no `joined`, sem `appearance` à parte. Ordem no fim de um tick: `state` → `zone` → `nearby`. Sem mídia configurada o servidor nunca envia `media`. Clientes antigos ignoram tipos desconhecidos.
 
 ## Proximidade
 
@@ -95,11 +100,21 @@ Ordem ao conectar: `welcome` → `media` (só com mídia) → `zone` → `nearby
 
 ## Zonas
 
-- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião) ou `private` (sala privada, ringue). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
+- Retângulos da camada `zones` do mapa (ver [Mapa](#mapa)), de tipo `meeting` (sala de reunião), `private` (sala privada, ringue) ou `desk` (estação de trabalho, ver [Mesas](#mesas)). Um tile pertence à zona se o centro dele cai no retângulo; zonas nunca dividem tiles.
 - Quem está numa zona ouve e é ouvido por todos da mesma zona, a qualquer distância, e por ninguém de fora, nem colado na porta. Fora de zonas vale a [Proximidade](#proximidade), só entre quem também está fora.
 - Mudança de zona é imediata no tick em que o jogador cruza a borda: sem histerese, e quem sai de uma zona não herda a histerese da distância (dois que saem juntos a `d² = 25` não ficam no conjunto).
 - O jogador recebe `zone` com a zona em que está ao conectar e a cada mudança; a zona dos outros não vai no protocolo (o cliente deriva das posições e do mapa, ambos públicos — presença por sala não é segredo).
 - O chat `nearby` herda a regra: dentro de uma zona chega só a quem está nela.
+
+### Mesas
+
+- Zona `kind: "desk"`, uma por estação (`mesa-01`…`mesa-12`): fileira da cadeira + fileira da mesa, 3×2 tiles. Isola como as outras zonas.
+- Mesa sem dono configurado (`VB_OFFICE32_DESKS_FILE`/`VB_OFFICE32_DESKS`) é aberta a todos. Mesa com dono só deixa entrar o dono e os convidados dele: o passo para um tile dela é recusado como tile bloqueado (vira, `ack` avança, posição igual). Dono offline (passada a carência) → só o dono entra.
+- `Desk`: `{ id: string, owner?: { id?: string, name: string }, online: boolean, locked: boolean }`. `locked` = tem dono, igual para todos os destinatários ("fechada para mim" é derivado no cliente). `owner` só em mesa com dono; `owner.id` depois que o dono conectou neste processo; `owner.name` = nome da sessão se online, senão o nome configurado, o da última sessão ou o da zona.
+- Dono: identidade cujo e-mail verificado está na configuração (em modo guest, o nome igual à parte local do e-mail). Se outra identidade já é dona online, quem chega entra sem mesa. Dono que conecta pela primeira vez (não substituição nem volta na carência) nasce no assento: o tile andável da zona mais perto do centro (empate: menor `y`, depois menor `x`).
+- Convite por identidade, até 20 por mesa; o alvo precisa estar online; repetido não faz nada. Sobrevive à desconexão do convidado. Termina com `deskRevoke` (alvo online ou não) ou quando o dono fica offline por mais de 30 s (carência própria da mesa, com ou sem mídia); a volta do dono dentro do prazo mantém os convidados.
+- Convidado dentro da mesa ao perder o convite: o servidor o move para o tile livre fora de zonas mais perto a pé. Mesma rodada: `deskInvite { invited: false }` ao alvo e `deskGuests` ao dono; no tick seguinte (≤ 50 ms) `state` (posição nova, `ack` = último `seq` recebido, inputs pendentes descartados), `zone { id: "" }` e `nearby`.
+- `deskInvite`/`deskRevoke` com JSON malformado ou `target` que não é string → close 1008. `target` vazio, maior que 300 bytes, o próprio remetente, desconhecido, remetente sem mesa ou que não é o dono online → ignorado em silêncio. Rate limit por identidade como o chat (0,5/s, burst 5), além do bucket geral.
 
 ### Token LiveKit
 
@@ -154,7 +169,7 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 
 1. A cada tick, para cada jogador com fila não vazia e cooldown expirado: consome 1 input.
 2. Atualiza `dir` sempre.
-3. Calcula destino. Fora do mapa ou tile bloqueado → não move (só vira). Caso contrário move.
+3. Calcula destino. Fora do mapa, tile bloqueado ou tile de outra zona fechada para o jogador ([Mesas](#mesas)) → não move (só vira). Caso contrário move.
 4. Jogadores não colidem entre si.
 5. `ack` = `seq` do input consumido (mesmo se bloqueado).
 6. Inputs com `seq` <= último ack são ignorados.
@@ -168,7 +183,7 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
   - `walls` (tilelayer) — qualquer gid ≠ 0 bloqueia
   - `spawns` (objectgroup) — objetos `point: true`; tile = `floor(x/32), floor(y/32)`
 - Camada opcional `decor` (tilelayer): arte sem colisão (cadeiras, monitores, quadros), desenhada acima de `walls`; o servidor a ignora.
-- Camada opcional `zones` (objectgroup): um retângulo (sem `point`, `ellipse`, `polygon`, `polyline`, `text` ou `gid`; `rotation` 0) por zona, até 255. O `name` nativo do objeto é o nome exibido (1–40 runes, não vazio); propriedades Tiled `string`: `id` (`[a-z0-9-]{1,32}`, único) e `kind` (`meeting` ou `private`). Tile na zona se o centro `(32x+16, 32y+16)` cai em `[x, x+width) × [y, y+height)`. O servidor recusa o mapa no boot se uma zona é inválida, tem `width`/`height` ≤ 0, não cobre nenhum tile, divide tile com outra, ou se um spawn cai numa zona.
+- Camada opcional `zones` (objectgroup): um retângulo (sem `point`, `ellipse`, `polygon`, `polyline`, `text` ou `gid`; `rotation` 0) por zona, até 255. O `name` nativo do objeto é o nome exibido (1–40 runes, não vazio); propriedades Tiled `string`: `id` (`[a-z0-9-]{1,32}`, único) e `kind` (`meeting`, `private` ou `desk`). Tile na zona se o centro `(32x+16, 32y+16)` cai em `[x, x+width) × [y, y+height)`. O servidor recusa o mapa no boot se uma zona é inválida, tem `width`/`height` ≤ 0, não cobre nenhum tile ou nenhum tile andável, divide tile com outra, ou se um spawn cai numa zona.
 - Camada opcional `areas` (objectgroup): retângulos com nome e propriedade `id`, como os de `zones` mas sem `kind`, que nomeiam partes do piso aberto (`copa`, `escritorio`) para as listas do cliente; o servidor a ignora e ela não muda áudio nem chat.
 - Tileset embutido no `.tmj` (`name: "office"`), atlas `web/public/game/office-tiles.png` de tiles 32 px com 1 px de borda repetida (`margin: 1`, `spacing: 2`, 16 colunas). Mapa e atlas são gerados por `tools/officeart` (`make art`) a partir de uma planta ASCII; o gid só indexa a arte, a colisão é apenas `walls` ≠ 0. O servidor nunca lê a imagem.
 
@@ -176,3 +191,4 @@ type Chat  = { id: string; at: number; from: string; fromName: string; scope: Sc
 
 - Identidade com última posição conhecida (memória do processo) → volta para ela, com a mesma direção e aparência. A memória guarda no máximo 1000 identidades ausentes; acima disso esquece a que saiu há mais tempo (posição e aparência juntas). Ao reentrar, a entrada é consumida. Reconexão que derruba a sessão anterior mantém posição e aparência (salvo `?av=` válido).
 - Senão → spawn point em ordem, ciclando.
+- Dono de mesa: ver [Mesas](#mesas) (assento na primeira conexão; posição lembrada dentro de mesa fechada para a identidade → tile livre fora mais perto).

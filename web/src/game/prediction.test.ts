@@ -82,6 +82,31 @@ describe('Predictor', () => {
   })
 })
 
+describe('Predictor gate', () => {
+  // x 2 is a locked desk unless the gate lets us in.
+  let open = false
+  const gate = (_: unknown, to: { x: number }) => open || to.x !== 2
+
+  it('does not predict a step into a locked desk, as the server refuses it', () => {
+    const p = new Predictor(grid, start)
+    p.setGate(gate)
+    p.input('right')
+    p.input('right')
+    expect(p.position).toEqual({ x: 1, y: 0, dir: 'right' })
+    expect(p.reconcile(2, { x: 1, y: 0, dir: 'right' })).toEqual({ x: 1, y: 0, dir: 'right' })
+  })
+
+  it('replays the pending inputs through the gate of the moment', () => {
+    const p = new Predictor(grid, start)
+    p.setGate(gate)
+    p.input('right')
+    p.input('right')
+    open = true
+    expect(p.reconcile(0, { x: 0, y: 0, dir: 'down' })).toEqual({ x: 2, y: 0, dir: 'right' })
+    open = false
+  })
+})
+
 describe('correctionFor', () => {
   it('snaps when more than one tile apart', () => {
     expect(correctionFor({ x: 0, y: 0 }, { x: 2, y: 0 })).toBe('snap')

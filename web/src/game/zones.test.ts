@@ -51,12 +51,14 @@ describe('ZoneMap', () => {
         zone('a', 0, 0, 32, 32),
         zone('b', 64, 0, 32, 32, { properties: [{ name: 'id', value: 'b' }, { name: 'kind', value: 'lounge' }] }),
         zone('c', 128, 0, 32, 32, { properties: [{ name: 'id', value: 'c' }] }),
+        zone('d', 192, 0, 32, 32, { properties: [{ name: 'id', value: 'd' }, { name: 'kind', value: 'desk' }] }),
       ]),
     )
     expect(map.zones.map((z) => [z.id, z.name, z.kind])).toEqual([
       ['a', 'A', 'meeting'],
       ['b', 'B', 'private'],
       ['c', 'C', 'private'],
+      ['d', 'D', 'desk'],
     ])
     expect(map.byId('b')?.kind).toBe('private')
     expect(map.byId('x')).toBeNull()
@@ -97,7 +99,23 @@ describe('ZoneMap', () => {
       { id: 'reuniao', name: 'Sala de reunião', kind: 'meeting', tiles: { x0: 12, y0: 1, x1: 26, y1: 9 } },
       { id: 'privada', name: 'Sala privada', kind: 'private', tiles: { x0: 1, y0: 10, x1: 11, y1: 17 } },
       { id: 'ringue', name: 'Ringue de box', kind: 'private', tiles: { x0: 39, y0: 10, x1: 49, y1: 17 } },
+      { id: 'mesa-01', name: 'Mesa 1', kind: 'desk', tiles: { x0: 15, y0: 13, x1: 18, y1: 15 } },
+      { id: 'mesa-02', name: 'Mesa 2', kind: 'desk', tiles: { x0: 18, y0: 13, x1: 21, y1: 15 } },
+      { id: 'mesa-03', name: 'Mesa 3', kind: 'desk', tiles: { x0: 21, y0: 13, x1: 24, y1: 15 } },
+      { id: 'mesa-04', name: 'Mesa 4', kind: 'desk', tiles: { x0: 15, y0: 15, x1: 18, y1: 17 } },
+      { id: 'mesa-05', name: 'Mesa 5', kind: 'desk', tiles: { x0: 18, y0: 15, x1: 21, y1: 17 } },
+      { id: 'mesa-06', name: 'Mesa 6', kind: 'desk', tiles: { x0: 21, y0: 15, x1: 24, y1: 17 } },
+      { id: 'mesa-07', name: 'Mesa 7', kind: 'desk', tiles: { x0: 26, y0: 13, x1: 29, y1: 15 } },
+      { id: 'mesa-08', name: 'Mesa 8', kind: 'desk', tiles: { x0: 29, y0: 13, x1: 32, y1: 15 } },
+      { id: 'mesa-09', name: 'Mesa 9', kind: 'desk', tiles: { x0: 32, y0: 13, x1: 35, y1: 15 } },
+      { id: 'mesa-10', name: 'Mesa 10', kind: 'desk', tiles: { x0: 26, y0: 15, x1: 29, y1: 17 } },
+      { id: 'mesa-11', name: 'Mesa 11', kind: 'desk', tiles: { x0: 29, y0: 15, x1: 32, y1: 17 } },
+      { id: 'mesa-12', name: 'Mesa 12', kind: 'desk', tiles: { x0: 32, y0: 15, x1: 35, y1: 17 } },
     ])
+    // Each desk is its chair row and its desk row; the walkways stay open.
+    expect(map.zoneAt(16, 13)?.id).toBe('mesa-01')
+    expect(map.zoneAt(18, 16)?.id).toBe('mesa-05')
+    for (const [x, y] of [[16, 12], [16, 17], [24, 14], [25, 15], [14, 13], [35, 16]] as const) expect(map.zoneAt(x, y)).toBeNull()
     // Doors and the office stay outside; the tile past a door is in.
     for (const [x, y] of [[18, 9], [19, 9], [11, 13], [11, 14], [38, 13], [38, 14], [24, 16], [12, 10]] as const)
       expect(map.zoneAt(x, y)).toBeNull()

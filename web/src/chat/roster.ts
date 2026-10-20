@@ -1,5 +1,6 @@
 import { DEFAULT_APPEARANCE, sameAppearance } from '../avatar/appearance'
 import type { Appearance } from '../avatar/appearance'
+import { deskLabel, Desks } from '../game/desks'
 import type { Tile } from '../game/grid'
 import { sameRoom, toRoom, ZoneMap } from '../game/zones'
 import type { Room } from '../game/zones'
@@ -26,8 +27,9 @@ const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true
 // Roster tracks who is in the space, who is in earshot and which room each
 // one is in, from the game socket alone, so chat works with or without
 // media. Our own room comes from the server; the others' from their
-// positions and the map, both public.
+// positions and the map, both public. A desk is named after its owner.
 export class Roster {
+  readonly desks = new Desks()
   private selfId: string | null = null
   private readonly names = new Map<string, string>()
   private labels = new Names([])
@@ -45,7 +47,7 @@ export class Roster {
 
   /** Our own room, as the server last said. */
   get room(): Room | null {
-    return this.own
+    return this.named(this.own)
   }
 
   /** Sets the map the others' rooms are read from; true when one changed. */
@@ -58,6 +60,7 @@ export class Roster {
 
   /** Applies msg and reports whether the roster changed. */
   handle(msg: ServerMessage): boolean {
+    const desks = this.desks.handle(msg)
     switch (msg.t) {
       case 'welcome':
         this.selfId = msg.d.selfId
@@ -108,7 +111,7 @@ export class Roster {
         this.nearbyIds = new Set(msg.d.ids.filter((id) => id !== this.selfId))
         return true
       default:
-        return false
+        return desks
     }
   }
 
@@ -137,7 +140,7 @@ export class Roster {
   }
 
   roomOf(id: string): Room | null {
-    return id === this.selfId ? this.own : (this.rooms.get(id) ?? null)
+    return this.named(id === this.selfId ? this.own : (this.rooms.get(id) ?? null))
   }
 
   /** The named part of the open floor id stands on, outside every room. */
@@ -193,6 +196,10 @@ export class Roster {
     if (area) this.areas.set(id, { id: area.id, name: area.name })
     else this.areas.delete(id)
     return (id !== this.selfId && before !== zone?.id) || areaBefore !== area?.id
+  }
+
+  private named(room: Room | null): Room | null {
+    return room?.kind === 'desk' ? { ...room, name: deskLabel(room, this.desks.get(room.id)) } : room
   }
 
   private relabel(): void {

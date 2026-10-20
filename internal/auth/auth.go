@@ -15,17 +15,24 @@ type Identity struct {
 	Name string
 	// Expires is when the session ends; zero means never.
 	Expires time.Time
+	// Desk is the id of the desk the identity owns, "" for none.
+	Desk string
 }
 
 // Guest trusts the "name" query parameter. It is meant for development.
-type Guest struct{}
+type Guest struct {
+	// Desks maps the lowercase local part of an owner's email to the desk:
+	// the guest of that name owns it.
+	Desks map[string]string
+}
 
-func (Guest) Authenticate(r *http.Request) (Identity, error) {
+func (g Guest) Authenticate(r *http.Request) (Identity, error) {
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if !validName(name) {
 		return Identity{}, ErrInvalidName
 	}
-	return Identity{ID: "guest:" + strings.ToLower(name), Name: name}, nil
+	lower := strings.ToLower(name)
+	return Identity{ID: "guest:" + lower, Name: name, Desk: g.Desks[lower]}, nil
 }
 
 func validName(name string) bool {

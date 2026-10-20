@@ -1,5 +1,6 @@
 import type { RosterFeed } from '../chat/feed'
 import type { Person } from '../chat/roster'
+import type { Desks } from '../game/desks'
 import { filterPeople, placeOf, SEARCH_FROM } from '../sidebar/places'
 import type { SpeakingSource } from '../scenes/OfficeScene'
 import { personTag } from './chat'
@@ -9,6 +10,18 @@ import type { Heads } from './heads'
 export type PeopleActions = {
   message(id: string): void
   locate(id: string): void
+  /** Invites id to our desk, or takes the invite back. */
+  invite(id: string, on: boolean): void
+}
+
+export type InviteAction = { invite: boolean; icon: string; text: string; label: string }
+
+/** Inviting someone else to our desk or taking it back; null without a desk of ours. */
+export function inviteAction(person: Pick<Person, 'id' | 'self' | 'label'>, desks: Pick<Desks, 'mine' | 'invited'>): InviteAction | null {
+  if (person.self || !desks.mine()) return null
+  return desks.invited(person.id)
+    ? { invite: false, icon: 'user-minus', text: 'Remover convite', label: `Remover convite de ${person.label}` }
+    : { invite: true, icon: 'user-plus', text: 'Convidar para minha mesa', label: `Convidar ${person.label} para minha mesa` }
 }
 
 type Row = {
@@ -18,6 +31,8 @@ type Row = {
   name: HTMLSpanElement
   place: HTMLSpanElement
   tag: HTMLSpanElement
+  invite: HTMLButtonElement
+  inviteIcon: string
   message: HTMLButtonElement
   locate: HTMLButtonElement
 }
@@ -48,7 +63,8 @@ export function placeText(person: Pick<Person, 'room' | 'area'>): string {
 
 /**
  * Everyone in the office with their head, where they are and whether they
- * speak; a message and "Ver no mapa" for each.
+ * speak; a message and "Ver no mapa" for each, and an invite to our desk
+ * when we have one.
  */
 export function createPeople(feed: RosterFeed, heads: Heads, speakers: SpeakingSource, actions: PeopleActions, onCount: (n: number) => void): void {
   const searchRow = requireElement('people-search-row', HTMLDivElement)
@@ -74,14 +90,16 @@ export function createPeople(feed: RosterFeed, heads: Heads, speakers: SpeakingS
     text.append(name, place)
     const tag = el('span', 'person-tag')
     const message = iconButton('message-circle', 'person-action')
+    const invite = iconButton('user-plus', 'person-action person-invite')
     const locate = iconButton('locate', 'person-action')
     const tools = el('span', 'person-actions')
-    tools.append(message, locate)
+    tools.append(message, invite, locate)
     item.append(avatar, text, tag, tools)
     const id = person.id
+    invite.addEventListener('click', () => actions.invite(id, !roster.desks.invited(id)))
     message.addEventListener('click', () => actions.message(id))
     locate.addEventListener('click', () => actions.locate(id))
-    view = { item, avatar, head, name, place, tag, message, locate }
+    view = { item, avatar, head, name, place, tag, invite, inviteIcon: 'user-plus', message, locate }
     rows.set(id, view)
     return view
   }
@@ -105,6 +123,14 @@ export function createPeople(feed: RosterFeed, heads: Heads, speakers: SpeakingS
       view.tag.hidden = !talking && tag === null
       view.avatar.classList.toggle('speaking', talking)
       view.item.classList.toggle('self', person.self)
+      const invite = inviteAction(person, roster.desks)
+      view.invite.hidden = invite === null
+      if (invite) {
+        if (invite.icon !== view.inviteIcon) view.invite.replaceChildren(icon(invite.icon))
+        view.inviteIcon = invite.icon
+        view.invite.setAttribute('aria-label', invite.label)
+        view.invite.title = invite.text
+      }
       view.message.hidden = person.self
       view.message.setAttribute('aria-label', `Mensagem para ${person.label}`)
       view.message.title = 'Mensagem direta'

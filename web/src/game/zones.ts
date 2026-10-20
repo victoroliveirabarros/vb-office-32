@@ -1,4 +1,5 @@
 import { isNumber, isRecord, isString } from '../guards'
+import { zoneKind } from '../net/protocol'
 import type { Zone, ZoneKind } from '../net/protocol'
 import { TILE_SIZE } from '../scenes/assets'
 
@@ -131,7 +132,7 @@ function toArea(obj: unknown, width: number, height: number): MapArea | null {
 function toZone(obj: unknown, width: number, height: number): MapZone | null {
   const area = toArea(obj, width, height)
   if (!area || !isRecord(obj)) return null
-  return { ...area, kind: property(obj, 'kind') === 'meeting' ? 'meeting' : 'private' }
+  return { ...area, kind: zoneKind(property(obj, 'kind')) }
 }
 
 // The server's zone message as a Room; null outside every zone.

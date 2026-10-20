@@ -3,6 +3,7 @@ package tilemap
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 )
@@ -12,10 +13,11 @@ type Kind string
 const (
 	Meeting Kind = "meeting"
 	Private Kind = "private"
+	Desk    Kind = "desk"
 )
 
 func (k Kind) Valid() bool {
-	return k == Meeting || k == Private
+	return k == Meeting || k == Private || k == Desk
 }
 
 const (
@@ -44,6 +46,65 @@ func (m *Map) ZoneAt(p Point) int {
 		return -1
 	}
 	return int(m.zoneAt[p.Y*m.Width+p.X]) - 1
+}
+
+// ZoneIndex returns the index in Zones of the zone with that id, or -1.
+func (m *Map) ZoneIndex(id string) int {
+	for i, z := range m.Zones {
+		if z.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// Seat returns the walkable tile of Zones[i] nearest the center of its
+// rectangle, the topmost and then leftmost on a tie.
+func (m *Map) Seat(i int) Point {
+	r := m.Zones[i].Rect
+	cx, cy := r.X+r.W/2, r.Y+r.H/2
+	best, bestD := Point{-1, -1}, math.Inf(1)
+	for y := range m.Height {
+		for x := range m.Width {
+			p := Point{x, y}
+			if m.ZoneAt(p) != i || m.Blocked(p) {
+				continue
+			}
+			dx := float64(x*TileSize+TileSize/2) - cx
+			dy := float64(y*TileSize+TileSize/2) - cy
+			// Row-major order keeps the first of equal distances.
+			if d := dx*dx + dy*dy; d < bestD {
+				best, bestD = p, d
+			}
+		}
+	}
+	return best
+}
+
+// Outside returns the walkable tile in no zone nearest from by walking, or
+// the first spawn when there is none.
+func (m *Map) Outside(from Point) Point {
+	if m.Blocked(from) {
+		return m.Spawns[0]
+	}
+	seen := make([]bool, m.Width*m.Height)
+	seen[from.Y*m.Width+from.X] = true
+	queue := []Point{from}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		if m.ZoneAt(p) < 0 {
+			return p
+		}
+		for _, d := range [...]Point{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+			q := p.Add(d)
+			if !m.Blocked(q) && !seen[q.Y*m.Width+q.X] {
+				seen[q.Y*m.Width+q.X] = true
+				queue = append(queue, q)
+			}
+		}
+	}
+	return m.Spawns[0]
 }
 
 type tiledProperty struct {
@@ -152,7 +213,7 @@ func validZoneID(id string) bool {
 // zone.
 func (m *Map) markZone(i int) error {
 	z := m.Zones[i]
-	n := 0
+	n, walkable := 0, 0
 	for y := range m.Height {
 		cy := float64(y*TileSize + TileSize/2)
 		if cy < z.Rect.Y || cy >= z.Rect.Y+z.Rect.H {
@@ -168,10 +229,16 @@ func (m *Map) markZone(i int) error {
 			}
 			m.zoneAt[y*m.Width+x] = uint8(i + 1)
 			n++
+			if !m.Blocked(Point{x, y}) {
+				walkable++
+			}
 		}
 	}
 	if n == 0 {
 		return fmt.Errorf("zone %q covers no tile", z.ID)
+	}
+	if walkable == 0 {
+		return fmt.Errorf("zone %q has no walkable tile", z.ID)
 	}
 	return nil
 }

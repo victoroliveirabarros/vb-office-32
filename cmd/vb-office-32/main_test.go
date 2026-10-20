@@ -410,7 +410,7 @@ func TestRunWithMedia(t *testing.T) {
 		Token     string `json:"token"`
 		ExpiresAt int64  `json:"expiresAt"`
 	}
-	for range 4 {
+	for range 5 {
 		_, msg, err := conn.Read(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -429,8 +429,8 @@ func TestRunWithMedia(t *testing.T) {
 			}
 		}
 	}
-	if !slices.Equal(types, []string{"welcome", "media", "zone", "nearby"}) {
-		t.Errorf("first messages = %v, want welcome, media, zone, nearby", types)
+	if !slices.Equal(types, []string{"welcome", "media", "zone", "desks", "nearby"}) {
+		t.Errorf("first messages = %v, want welcome, media, zone, desks, nearby", types)
 	}
 	if grant.URL != "ws://localhost:7880" || strings.Count(grant.Token, ".") != 2 {
 		t.Errorf("media = %+v", grant)

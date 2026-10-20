@@ -52,7 +52,9 @@ type OIDCConfig struct {
 	// PreviousSessionKey, when set, still verifies cookies signed before a
 	// rotation; new cookies are always signed with SessionKey.
 	PreviousSessionKey []byte
-	Log                *slog.Logger
+	// Desks maps lowercase emails to the desks they own.
+	Desks map[string]string
+	Log   *slog.Logger
 }
 
 // OIDC authenticates with an OpenID Connect provider and keeps the result in
@@ -69,9 +71,13 @@ type OIDC struct {
 	flowCookie    string
 	session       signer
 	flow          signer
-	client        *http.Client
-	log           *slog.Logger
-	now           func() time.Time
+	// deskKeys tag emails with the current key first; deskTags resolves the
+	// tags of every key to their desks.
+	deskKeys [][]byte
+	deskTags map[string]string
+	client   *http.Client
+	log      *slog.Logger
+	now      func() time.Time
 
 	discovering sync.Mutex
 	endpoints   atomic.Pointer[endpoints]
@@ -129,6 +135,16 @@ func NewOIDC(cfg OIDCConfig) (*OIDC, error) {
 	if err != nil {
 		return nil, err
 	}
+	dks, err := deskKeys(keys...)
+	if err != nil {
+		return nil, err
+	}
+	tags := make(map[string]string, len(cfg.Desks)*len(dks))
+	for email, desk := range cfg.Desks {
+		for _, k := range dks {
+			tags[deskTag(k, email)] = desk
+		}
+	}
 	o := &OIDC{
 		issuer:        cfg.Issuer,
 		clientID:      cfg.ClientID,
@@ -141,6 +157,8 @@ func NewOIDC(cfg OIDCConfig) (*OIDC, error) {
 		flowCookie:    flowCookie,
 		session:       session,
 		flow:          flow,
+		deskKeys:      dks,
+		deskTags:      tags,
 		client:        &http.Client{Timeout: httpTimeout},
 		log:           cfg.Log,
 		now:           time.Now,

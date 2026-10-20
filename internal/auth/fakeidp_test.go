@@ -807,8 +807,13 @@ func TestSessionPayloadHasNoEmail(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
+	keys, err := deskKeys(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]any{
 		"v": float64(2), "exp": got["exp"], "sub": testSub, "name": "Ana.Lima", "domain": "example.com", "hd": "example.com",
+		"et": deskTag(keys[0], "ana.lima@example.com"),
 	}
 	if len(got) != len(want) || strings.Contains(string(raw), "@") {
 		t.Errorf("payload = %s, want only %v", raw, want)

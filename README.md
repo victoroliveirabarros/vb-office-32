@@ -44,19 +44,22 @@ and no `$`.
 | `VB_OFFICE32_LIVEKIT_URL`        | for media | —                             | no     | LiveKit URL the browser connects to, `wss://host[:port]` without path; `ws` only for `localhost`/`127.0.0.1`. |
 | `VB_OFFICE32_LIVEKIT_API_KEY`    | for media | —                             | no     | LiveKit API key (it goes in every token, so it is not secret). |
 | `VB_OFFICE32_LIVEKIT_API_SECRET` | for media | —                             | yes    | LiveKit API secret; under 32 characters only logs a warning, for the development `secret`. |
+| `VB_OFFICE32_DESKS_FILE`         | no        | —                             | no     | JSON file with the [desk owners](#desks), e.g. a mounted ConfigMap. Read at boot only. |
+| `VB_OFFICE32_DESKS`              | no        | —                             | no     | The same JSON inline, instead of the file; setting both is an error. |
 
 Invalid values stop the server at boot with an error naming the variable,
 never its value. The OIDC provider itself is contacted on the first login,
 not at boot. The three LiveKit variables go together: all of them turn media
-on, none turns it off, and a partial set is an error.
+on, none turns it off, and a partial set is an error. Desk errors name the
+variable and the desk, never an email.
 
 ## Audio and video
 
 With the LiveKit variables set, each player gets a LiveKit token right after
 `welcome` (`media`). Media or not, the server sends each player the set of
 players within earshot (`nearby`): a pair becomes near at 4 tiles and stops
-at more than 5. The meeting room and the private rooms are zones of the map
-(`zones` layer): inside one, earshot is everyone in the same zone at any
+at more than 5. The meeting room, the private rooms and the [desks](#desks)
+are zones of the map (`zones` layer): inside one, earshot is everyone in the same zone at any
 distance and nobody outside, not even at the door, and each player is told
 its own zone (`zone`) at join and whenever it crosses a border. Tokens last
 10 minutes and are reissued about every 5 (the server checks once a
@@ -73,8 +76,10 @@ The microphone turns on at join (a mute is remembered in `localStorage`),
 the camera starts off, and the buttons at the bottom toggle both. Everyone
 in `nearby` is heard, louder when closer (full volume up to 1 tile, down to
 20% at 4); the cameras of the 8 closest show as small tiles at the top, and
-a ring marks who is speaking. When the browser blocks autoplay an "Ativar
-áudio" button appears.
+a ring marks who is speaking. Inside any zone (meeting, private room or
+desk) one person at a time can share a screen with that zone; leaving the
+zone, or stepping into another, stops it. When the browser blocks autoplay
+an "Ativar áudio" button appears.
 
 ```sh
 make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networking
@@ -84,6 +89,52 @@ make livekit     # LiveKit --dev on :7880 (devkey / secret), Linux host networki
 starts LiveKit when `VB_OFFICE32_LIVEKIT_URL` is `ws://localhost` or
 `ws://127.0.0.1`. In guest mode run
 `make livekit`, `make run` and `make web-dev`.
+
+## Desks
+
+Each of the 12 stations of the open office is a zone of kind `desk`
+(`mesa-01`…`mesa-12`, west block then east, north row then south): the
+chair row and the desk row, 3×2 tiles. Like any zone it isolates: only
+those at the same desk hear, see and read "Perto" each other, so neighbours
+at the next desk and whoever walks behind the chairs no longer hear by
+proximity. The walkways, the corridor and the doors stay outside every desk.
+
+A desk can have an owner, set by the admin in `VB_OFFICE32_DESKS_FILE` (or
+`VB_OFFICE32_DESKS`) and changed only by a redeploy:
+
+```json
+{
+  "mesa-01": {"email": "ana@example.com", "name": "Ana Souza"},
+  "mesa-07": {"email": "dani@example.com"}
+}
+```
+
+The `name` (1 to 32 characters) is optional and shows while the owner is
+away. The boot fails on an id that is not a desk of the map, an unknown
+field, a desk listed twice, an invalid or repeated email (compared in
+lowercase), an email outside `VB_OFFICE32_ALLOWED_DOMAINS` or a file over
+64 KiB. [`docs/desks.example.json`](docs/desks.example.json) gives desks
+to Ana and Bruno, the development IdP's presets, and to `dani@example.com`,
+who logs in with its form.
+
+A desk without an owner is open to everyone. A desk with one lets in only
+the owner and whoever the owner invites; the server refuses the step into
+it as it refuses a wall, whatever the client sends, and only the owner
+gets in once the owner has been offline for 30 seconds. The owner joins seated at the desk's chair (not
+on a second tab or a quick reconnect). Invites are per identity, at most 20
+per desk, and survive the guest reconnecting; they end when the owner
+revokes them or stays away for more than 30 seconds, and a guest then
+inside is moved at once to the nearest tile outside, which also ends the
+shared hearing. The owner is matched by the session's verified email: with
+OIDC the session keeps an HMAC tag of it (see [Login](#login)), so a
+session from before desks gets its desk at its next login, within 12 hours.
+
+In guest mode a guest named like the local part of an owner's email
+(`ana` for `ana@example.com`) owns that desk. Since guests pick their own
+names, desk owners in guest mode require `VB_OFFICE32_ADDR` on `localhost`
+or `127.0.0.1`, the hosts the rest of the configuration already treats as
+development; the boot fails otherwise, and also when two owners share a
+local part. Messages are in the [protocol spec](specs/phase1-protocol.md#desks).
 
 ## Chat
 
@@ -104,8 +155,8 @@ nothing survives a restart. Message text, recipients and client ids never
 reach the logs. Rules and formats are in the
 [protocol spec](specs/phase1-protocol.md#chat).
 
-In the browser each zone has its own carpet and a sign with its name on the
-wall above it, the room you are in gets a thin outline, and a strip at the
+In the browser each zone has its own carpet and, desks aside, a sign with
+its name on the wall above it, the room you are in gets a thin outline, and a strip at the
 top left of the map shows it ("Ringue de box — privada"). Inside a zone the
 "Perto" tab takes the room's name and warns that only the room sees it.
 Clicking someone's avatar, or the message button next to their name, opens
@@ -115,9 +166,9 @@ their id (`Ana #k3f9`) in the lists, the chat and over the avatars.
 
 A sidebar on the left holds the panels: **Chat**, **Pessoas** (everyone with
 their avatar's head, where they are, who is talking, a direct message and
-"Ver no mapa"), **Salas** (the zones plus the open office and the kitchen,
-named by the map's `areas` layer, with who is in each and "Ver na visão
-geral"), **Avatar** (the editor) and **Configurações** (theme, microphone,
+"Ver no mapa"), **Salas** (the zones but the desks, plus the open office,
+where people at a desk count for now, and the kitchen, named by the map's
+`areas` layer, with who is in each and "Ver na visão geral"), **Avatar** (the editor) and **Configurações** (theme, microphone,
 camera and audio output while media is on, the default zoom, and Sair with
 OIDC). It shows your head, name and place on top and the latency at the
 bottom, collapses to a rail of icons (remembered in the browser), opens one
@@ -137,7 +188,10 @@ is true and that the email domain is in `VB_OFFICE32_ALLOWED_DOMAINS`.
 With the Google issuer the `hd` claim is also required and must be allowed,
 which keeps out personal Google accounts registered with a company address.
 The session is a signed `HttpOnly` cookie valid for 12 hours that keeps the
-subject, the display name and the email domain, not the address; open
+subject, the display name, the email domain and, for [desks](#desks), a
+16-byte HMAC of the lowercase email under a key derived from the session
+key, not the address; the server resolves that tag against the configured
+owners on every connection and never logs it. Open
 WebSockets close with 4002 when it expires. Removing a domain from the list
 revokes its sessions on their next request.
 
@@ -226,8 +280,8 @@ blocks of cubicles, back to back in two rows of three, each station three
 tiles wide with a white desk, side panels, drawers and its own mix of
 monitors, laptop, computer, plants and an aquarium, plus a lounge and a table
 for six. The meeting room, the private room and the ring look onto the office
-through glass partitions; outer walls are white with a graphite skirting. Above it sit the meeting room (`reuniao`, a `meeting` zone
-where screens can be shared) and the kitchen, which opens wide onto the
+through glass partitions; outer walls are white with a graphite skirting. Above it sit the meeting room (`reuniao`, a `meeting` zone)
+and the kitchen, which opens wide onto the
 office and is no zone, so talk there goes by distance as in the office; on
 its left the private room for six (`privada`) and on its right the boxing
 ring (`ringue`), both `private` zones. Each room has one door to the office. Tiles marked `~` are outside

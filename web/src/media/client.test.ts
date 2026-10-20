@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Player, ServerMessage } from '../net/protocol'
+import type { Player, ServerMessage, ZoneKind } from '../net/protocol'
 import { DeviceFailure, MediaClient } from './client'
 import type { DeviceState, LinkState, MediaRoom, MediaView, RoomListener, ScreenState } from './client'
 import type { DeviceKind } from './devices'
@@ -202,7 +202,7 @@ const welcome = (players: Player[]): ServerMessage => ({
 })
 const media = (token: string, expiresAt = NOW + 600_000): ServerMessage => ({ t: 'media', d: { url: URL, token, expiresAt } })
 const nearby = (...ids: string[]): ServerMessage => ({ t: 'nearby', d: { ids } })
-const zone = (id = '', kind: 'meeting' | 'private' = 'meeting'): ServerMessage => ({
+const zone = (id = '', kind: ZoneKind = 'meeting'): ServerMessage => ({
   t: 'zone',
   d: id === '' ? { id } : { id, name: id, kind },
 })
@@ -723,29 +723,61 @@ describe('MediaClient', () => {
     expect(r.volumes.get('bob')).toBe(0)
   })
 
-  it('shares the screen only in a meeting room and stops on leaving it', async () => {
+  it('shares the screen in any zone and stops on leaving it', async () => {
     const client = setup()
     client.handle(welcome([]))
     client.handle(media('t1'))
     await vi.runAllTimersAsync()
     const r = room()
     client.toggleScreen()
-    client.handle(zone('cabine', 'private'))
-    client.toggleScreen()
     expect(r.screen).toEqual([])
-    expect(view.screen).toMatchObject({ on: false, meeting: false })
+    expect(view.screen).toMatchObject({ on: false, inZone: false })
 
-    client.handle(zone('sala-1'))
-    expect(view.screen).toMatchObject({ on: false, meeting: true })
+    for (const [id, kind] of [['sala-1', 'meeting'], ['cabine', 'private'], ['mesa-01', 'desk']] as const) {
+      client.handle(zone(id, kind))
+      expect(view.screen).toMatchObject({ on: false, inZone: true })
+      client.toggleScreen()
+      await vi.runAllTimersAsync()
+      expect(view.screen).toEqual({ on: true, busy: false, error: null, inZone: true, desk: kind === 'desk', taken: false })
+
+      client.handle(zone())
+      await vi.runAllTimersAsync()
+      expect(view.screen).toMatchObject({ on: false, busy: false, inZone: false })
+    }
+    expect(r.screen).toEqual([true, false, true, false, true, false])
+  })
+
+  it('stops a share on stepping from one desk straight into the next without widening permissions', async () => {
+    const client = setup()
+    client.handle(welcome([player('ana', 1), player('bob', 6)]))
+    client.handle(zone('mesa-01', 'desk'))
+    client.handle(media('t1'))
+    await vi.runAllTimersAsync()
+    const r = room()
+    client.handle(nearby('ana'))
     client.toggleScreen()
     await vi.runAllTimersAsync()
-    expect(r.screen).toEqual([true])
-    expect(view.screen).toEqual({ on: true, busy: false, error: null, meeting: true, taken: false })
+    expect(r.shared).toBe(true)
 
-    client.handle(zone())
+    const unpublished = deferred()
+    r.screenGate = unpublished.promise
+    r.log = []
+    client.handle(zone('mesa-02', 'desk'))
+    client.handle(nearby('bob'))
     await vi.runAllTimersAsync()
-    expect(r.screen).toEqual([true, false])
-    expect(view.screen).toMatchObject({ on: false, busy: false, meeting: false })
+    expect(r.log).toEqual(['screen false', 'allow []'])
+    expect(view.screen).toMatchObject({ on: false, busy: true, inZone: true })
+    unpublished.resolve()
+    await vi.runAllTimersAsync()
+    expect(r.log).toEqual(['screen false', 'allow []', 'allow [bob]'])
+    expect(r.shared).toBe(false)
+    expect(view.screen).toMatchObject({ on: false, busy: false })
+
+    client.toggleScreen()
+    await vi.runAllTimersAsync()
+    client.handle(nearby('ana', 'bob'))
+    expect(r.log.slice(-2)).toEqual(['screen true', 'allow [ana,bob]'])
+    expect(view.screen).toMatchObject({ on: true, busy: false })
   })
 
   it('stops a share whose picker was still open when leaving the room', async () => {
@@ -927,7 +959,7 @@ describe('MediaClient', () => {
     r.log = []
     client.handle(zone())
     client.handle(nearby('bob'))
-    expect(view.screen).toMatchObject({ on: false, busy: true, meeting: false })
+    expect(view.screen).toMatchObject({ on: false, busy: true, inZone: false })
 
     const unpublished = deferred()
     r.screenGate = unpublished.promise

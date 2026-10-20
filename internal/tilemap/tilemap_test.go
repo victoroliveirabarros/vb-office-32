@@ -2,7 +2,7 @@ package tilemap
 
 import (
 	"encoding/json"
-	"slices"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -127,12 +127,69 @@ func TestOfficeMap(t *testing.T) {
 	}
 
 	want := map[string]Kind{"reuniao": Meeting, "privada": Private, "ringue": Private}
-	if len(m.Zones) != len(want) {
-		t.Errorf("zones = %+v, want %v", m.Zones, want)
+	for i := 1; i <= 12; i++ {
+		want[fmt.Sprintf("mesa-%02d", i)] = Desk
+	}
+	if len(m.Zones) != 15 {
+		t.Errorf("got %d zones, want 15", len(m.Zones))
 	}
 	for _, z := range m.Zones {
 		if want[z.ID] != z.Kind {
 			t.Errorf("zone %q is %q, want %q", z.ID, z.Kind, want[z.ID])
+		}
+	}
+	desks := []struct {
+		id   string
+		rect Rect
+		seat Point
+	}{
+		{"mesa-01", Rect{480, 416, 96, 64}, Point{16, 13}},
+		{"mesa-02", Rect{576, 416, 96, 64}, Point{19, 13}},
+		{"mesa-03", Rect{672, 416, 96, 64}, Point{22, 13}},
+		{"mesa-04", Rect{480, 480, 96, 64}, Point{16, 16}},
+		{"mesa-05", Rect{576, 480, 96, 64}, Point{19, 16}},
+		{"mesa-06", Rect{672, 480, 96, 64}, Point{22, 16}},
+		{"mesa-07", Rect{832, 416, 96, 64}, Point{27, 13}},
+		{"mesa-08", Rect{928, 416, 96, 64}, Point{30, 13}},
+		{"mesa-09", Rect{1024, 416, 96, 64}, Point{33, 13}},
+		{"mesa-10", Rect{832, 480, 96, 64}, Point{27, 16}},
+		{"mesa-11", Rect{928, 480, 96, 64}, Point{30, 16}},
+		{"mesa-12", Rect{1024, 480, 96, 64}, Point{33, 16}},
+	}
+	inDesk := make([]bool, m.Width*m.Height)
+	for n, d := range desks {
+		i := m.ZoneIndex(d.id)
+		if i != 3+n {
+			t.Errorf("ZoneIndex(%q) = %d, want %d", d.id, i, 3+n)
+			continue
+		}
+		z := m.Zones[i]
+		if z.Rect != d.rect || z.Name != fmt.Sprintf("Mesa %d", n+1) {
+			t.Errorf("%s = %+v, want %v named Mesa %d", d.id, z, d.rect, n+1)
+		}
+		if got := m.Seat(i); got != d.seat {
+			t.Errorf("Seat(%s) = %v, want %v", d.id, got, d.seat)
+		}
+		tiles, walkable := 0, 0
+		for y := range m.Height {
+			for x := range m.Width {
+				if p := (Point{x, y}); m.ZoneAt(p) == i {
+					inDesk[y*m.Width+x] = true
+					tiles++
+					if !m.Blocked(p) {
+						walkable++
+						if p.Y != d.seat.Y {
+							t.Errorf("%s: walkable %v off the chair row", d.id, p)
+						}
+					}
+				}
+			}
+		}
+		if tiles != 6 || walkable != 3 {
+			t.Errorf("%s: %d tiles, %d walkable, want 6 and 3", d.id, tiles, walkable)
+		}
+		if out := m.Outside(d.seat); m.ZoneAt(out) >= 0 || m.Blocked(out) || out.X != d.seat.X || abs(out.Y-d.seat.Y) != 1 {
+			t.Errorf("Outside(%v) = %v, want the tile just past the chair", d.seat, out)
 		}
 	}
 	zoneID := func(p Point) string {
@@ -176,6 +233,9 @@ func TestOfficeMap(t *testing.T) {
 		if p.X < 12 || p.X > 37 || p.Y < 10 || p.Y > 23 {
 			t.Errorf("spawn %v is outside the office", p)
 		}
+		if m.ZoneAt(p) >= 0 {
+			t.Errorf("spawn %v is in zone %q", p, zoneID(p))
+		}
 	}
 	// Outside the office's outline nothing is walkable.
 	for _, p := range []Point{{0, 0}, {10, 8}, {39, 0}, {49, 8}, {0, 18}, {10, 24}, {39, 18}, {49, 24}} {
@@ -184,28 +244,52 @@ func TestOfficeMap(t *testing.T) {
 		}
 	}
 
-	// Every free tile is reachable from the spawns.
-	seen := make([]bool, m.Width*m.Height)
-	queue := slices.Clone(m.Spawns)
-	for _, p := range queue {
-		seen[p.Y*m.Width+p.X] = true
-	}
-	for len(queue) > 0 {
-		p := queue[0]
-		queue = queue[1:]
-		for _, d := range []Point{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
-			q := p.Add(d)
-			if !m.Blocked(q) && !seen[q.Y*m.Width+q.X] {
-				seen[q.Y*m.Width+q.X] = true
-				queue = append(queue, q)
+	// Every free tile is reachable from the spawns, and every free tile out
+	// of the desks without stepping on one.
+	reach := func(from Point, avoid []bool) []bool {
+		seen := make([]bool, m.Width*m.Height)
+		seen[from.Y*m.Width+from.X] = true
+		queue := []Point{from}
+		for len(queue) > 0 {
+			p := queue[0]
+			queue = queue[1:]
+			for _, d := range []Point{{0, -1}, {0, 1}, {-1, 0}, {1, 0}} {
+				q := p.Add(d)
+				if !m.Blocked(q) && !seen[q.Y*m.Width+q.X] && (avoid == nil || !avoid[q.Y*m.Width+q.X]) {
+					seen[q.Y*m.Width+q.X] = true
+					queue = append(queue, q)
+				}
 			}
 		}
+		return seen
 	}
+	all, around := reach(m.Spawns[0], nil), reach(m.Spawns[0], inDesk)
+	free := 0
 	for y := range m.Height {
 		for x := range m.Width {
-			if p := (Point{x, y}); !m.Blocked(p) && !seen[y*m.Width+x] {
+			p, i := Point{x, y}, y*m.Width+x
+			if m.Blocked(p) {
+				continue
+			}
+			if !all[i] {
 				t.Errorf("free tile %v is unreachable from the spawns", p)
+			}
+			if !inDesk[i] {
+				free++
+				if !around[i] {
+					t.Errorf("free tile %v is reachable only through a desk", p)
+				}
 			}
 		}
 	}
+	if free != 548 {
+		t.Errorf("%d free tiles out of the desks, want 548", free)
+	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

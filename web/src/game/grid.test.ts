@@ -41,6 +41,12 @@ describe('Grid', () => {
     expect(grid.move({ x: 0, y: 0, dir: 'down' }, 'left')).toEqual({ x: 0, y: 0, dir: 'left' })
   })
 
+  it('only turns when the gate refuses the step', () => {
+    const gate = (from: { x: number; y: number }, to: { x: number; y: number }) => !(from.y === 0 && to.y === 1)
+    expect(grid.move({ x: 0, y: 0, dir: 'up' }, 'down', gate)).toEqual({ x: 0, y: 0, dir: 'down' })
+    expect(grid.move({ x: 0, y: 1, dir: 'up' }, 'right', gate)).toEqual({ x: 1, y: 1, dir: 'right' })
+  })
+
   it('rejects maps without a valid walls layer', () => {
     expect(() => Grid.fromTiled({ width: 3, height: 2, layers: [] })).toThrow()
     expect(() => Grid.fromTiled({ width: 3, height: 2, layers: [{ name: 'walls', type: 'tilelayer', data: [0] }] })).toThrow()

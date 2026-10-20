@@ -18,6 +18,9 @@ const (
 
 	purposeSession = "vb-office-32 session v1"
 	purposeFlow    = "vb-office-32 oidc-flow v1"
+	purposeDesk    = "vb-office-32 desk-owner v1"
+
+	deskTagLen = 16
 )
 
 var (
@@ -96,6 +99,23 @@ func (s signer) open(token string, now time.Time, p payload) error {
 		return errInvalidToken
 	}
 	return nil
+}
+
+// deskTag names an email in the session without keeping it.
+func deskTag(key []byte, email string) string {
+	return base64.RawURLEncoding.EncodeToString(mac(key, strings.ToLower(email))[:deskTagLen])
+}
+
+func deskKeys(secrets ...[]byte) ([][]byte, error) {
+	keys := make([][]byte, len(secrets))
+	for i, secret := range secrets {
+		key, err := hkdf.Key(sha256.New, secret, nil, purposeDesk, sha256.Size)
+		if err != nil {
+			return nil, err
+		}
+		keys[i] = key
+	}
+	return keys, nil
 }
 
 func mac(key []byte, body string) []byte {

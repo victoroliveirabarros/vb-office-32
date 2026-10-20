@@ -54,12 +54,17 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
+	if err := checkDesks(m, cfg); err != nil {
+		return err
+	}
+	emails, locals, names := ownerMaps(cfg.desks)
 	var (
-		authn realtime.Authenticator = auth.Guest{}
+		authn realtime.Authenticator = auth.Guest{Desks: locals}
 		login httpapi.OIDC
 	)
 	if cfg.auth == authOIDC {
 		cfg.oidc.Log = log
+		cfg.oidc.Desks = emails
 		if cfg.oidc.PreviousSessionKey != nil && bytes.Equal(cfg.oidc.PreviousSessionKey, cfg.oidc.SessionKey) {
 			log.Warn("VB_OFFICE32_SESSION_KEY_PREVIOUS equals VB_OFFICE32_SESSION_KEY; set the new key before deploying a rotation")
 		}
@@ -88,7 +93,9 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 
 	var ready atomic.Bool
 
-	hub := realtime.NewHub(realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), mi, log))
+	room := realtime.NewRoom(realtime.DefaultSpace, mapID, world.NewSpace(m), mi, log)
+	room.SetDesks(names)
+	hub := realtime.NewHub(room)
 	ws := realtime.NewHandler(hub, authn, cfg.allowedOrigins, cfg.maxSessions, log)
 	var webhook http.Handler
 	if lkClient != nil {
@@ -110,7 +117,7 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer) erro
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions, "media", mi != nil)
+	log.Info("listening", "addr", ln.Addr().String(), "auth", cfg.auth, "max_sessions", cfg.maxSessions, "media", mi != nil, "desks", len(cfg.desks))
 
 	// The hub outlives ctx so sessions are closed only after readiness has
 	// turned false, while the listener still answers /readyz with 503.

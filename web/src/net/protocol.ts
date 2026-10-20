@@ -22,6 +22,8 @@ export type ClientMessage =
   | { t: 'ping'; d: { ts: number } }
   | { t: 'chat'; d: ChatSend }
   | { t: 'appearance'; d: Appearance }
+  | { t: 'deskInvite'; d: { target: string } }
+  | { t: 'deskRevoke'; d: { target: string } }
 
 export type Welcome = {
   selfId: string
@@ -39,7 +41,7 @@ export type Media = { url: string; token: string; expiresAt: number }
 /** Full set of players in earshot of the recipient, sorted, without itself. */
 export type Nearby = { ids: string[] }
 
-export type ZoneKind = 'meeting' | 'private'
+export type ZoneKind = 'meeting' | 'private' | 'desk'
 
 /** The recipient's own zone; id "" means outside every zone. */
 export type Zone = { id: string; name?: string; kind?: ZoneKind }
@@ -60,6 +62,20 @@ export type ChatError = { cid: string; reason: ChatErrorReason }
 
 export type AppearanceChange = { id: string; appearance: Appearance }
 
+/**
+ * A desk's public state, flattened from the wire: locked means it has an
+ * owner, whoever reads it; ownerId only once the owner connected.
+ */
+export type Desk = { id: string; ownerId?: string; ownerName?: string; online: boolean; locked: boolean }
+
+export type DeskGuest = { id: string; name: string; online: boolean }
+
+/** Only to the owner: who is invited to the desk. */
+export type DeskGuests = { desk: string; guests: DeskGuest[] }
+
+/** Only to the guest: invited to the desk, or no longer. */
+export type DeskInvite = { desk: string; owner: string; ownerName: string; invited: boolean }
+
 export type ServerMessage =
   | { t: 'welcome'; d: Welcome }
   | { t: 'joined'; d: Player }
@@ -73,6 +89,9 @@ export type ServerMessage =
   | { t: 'chatHistory'; d: { messages: Chat[] } }
   | { t: 'chatError'; d: ChatError }
   | { t: 'appearance'; d: AppearanceChange }
+  | { t: 'desks'; d: { desks: Desk[] } }
+  | { t: 'deskGuests'; d: DeskGuests }
+  | { t: 'deskInvite'; d: DeskInvite }
 
 export const CLOSE_REPLACED = 4001
 export const CLOSE_EXPIRED = 4002
@@ -132,6 +151,18 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       const appearance = fromWire(d.appearance)
       return isString(d.id) && appearance ? { t: 'appearance', d: { id: d.id, appearance } } : null
     }
+    case 'desks': {
+      const desks = Array.isArray(d.desks) ? d.desks.map(toDesk) : null
+      return desks?.every((desk) => desk !== null) ? { t: 'desks', d: { desks } } : null
+    }
+    case 'deskGuests': {
+      const guests = Array.isArray(d.guests) ? d.guests.map(toGuest) : null
+      return isString(d.desk) && guests?.every((g) => g !== null) ? { t: 'deskGuests', d: { desk: d.desk, guests } } : null
+    }
+    case 'deskInvite':
+      return isString(d.desk) && isString(d.owner) && isString(d.ownerName) && typeof d.invited === 'boolean'
+        ? { t: 'deskInvite', d: { desk: d.desk, owner: d.owner, ownerName: d.ownerName, invited: d.invited } }
+        : null
     default:
       return null
   }
@@ -182,13 +213,32 @@ function isNearby(d: Record<string, unknown>): d is Nearby {
 }
 
 // A kind unknown to this client is treated as the most restrictive one.
+export function zoneKind(v: unknown): ZoneKind {
+  return v === 'meeting' || v === 'desk' ? v : 'private'
+}
+
 function toZone(d: Record<string, unknown>): Zone | null {
   if (!isString(d.id)) return null
   if (d.id === '') return { id: '' }
   if (d.name != null && !isString(d.name)) return null
-  const zone: Zone = { id: d.id, kind: d.kind === 'meeting' ? 'meeting' : 'private' }
+  const zone: Zone = { id: d.id, kind: zoneKind(d.kind) }
   if (isString(d.name)) zone.name = d.name
   return zone
+}
+
+function toDesk(v: unknown): Desk | null {
+  if (!isRecord(v) || !isString(v.id) || typeof v.online !== 'boolean' || typeof v.locked !== 'boolean') return null
+  const desk: Desk = { id: v.id, online: v.online, locked: v.locked }
+  if (v.owner == null) return desk
+  const { owner } = v
+  if (!isRecord(owner) || !isString(owner.name) || (owner.id != null && !isString(owner.id))) return null
+  desk.ownerName = owner.name
+  if (isString(owner.id) && owner.id !== '') desk.ownerId = owner.id
+  return desk
+}
+
+function toGuest(v: unknown): DeskGuest | null {
+  return isRecord(v) && isString(v.id) && isString(v.name) && typeof v.online === 'boolean' ? { id: v.id, name: v.name, online: v.online } : null
 }
 
 export function isChatScope(v: unknown): v is ChatScope {

@@ -25,12 +25,19 @@ const CAMERA_ERROR: Record<DeviceError, string> = {
   other: 'Falha ao abrir a câmera',
 }
 
-const SCREEN_ERROR: Record<ScreenError, string> = {
+const SCREEN_ERROR: Record<Exclude<ScreenError, 'taken'>, string> = {
   denied: 'Compartilhamento de tela bloqueado',
   'not-found': 'Nenhuma tela disponível',
   'in-use': 'Tela em uso por outro app',
   other: 'Falha ao compartilhar a tela',
-  taken: 'Outra pessoa da sala começou a compartilhar antes',
+}
+
+// As the chat says it.
+const where = (state: ScreenState) => (state.desk ? 'mesa' : 'sala')
+
+export function screenError(state: ScreenState): string {
+  if (state.error === null) return ''
+  return state.error === 'taken' ? `Outra pessoa da ${where(state)} começou a compartilhar antes` : SCREEN_ERROR[state.error]
 }
 
 const SELF = ''
@@ -55,7 +62,7 @@ export function createMediaView(): BoundMediaView {
   let link: LinkState = 'idle'
   let mic: DeviceState = { on: false, busy: false, error: null }
   let camera: DeviceState = { on: false, busy: false, error: null }
-  let screen: ScreenState = { on: false, busy: false, error: null, meeting: false, taken: false }
+  let screen: ScreenState = { on: false, busy: false, error: null, inZone: false, desk: false, taken: false }
 
   const render = () => {
     bar.hidden = link === 'idle'
@@ -74,7 +81,7 @@ export function createMediaView(): BoundMediaView {
       LINK_TEXT[link] ||
       (mic.error && MIC_ERROR[mic.error]) ||
       (camera.error && CAMERA_ERROR[camera.error]) ||
-      (screen.error && SCREEN_ERROR[screen.error]) ||
+      screenError(screen) ||
       ''
     note.hidden = note.textContent === ''
   }
@@ -172,18 +179,18 @@ export function deviceButton(state: DeviceState, stopped: boolean, device: strin
 
 export type ShareButton = { hidden: boolean; disabled: boolean; text: string; title: string }
 
-// The share button shows only in a meeting room, or while sharing so it can
+// The share button shows only inside a zone, or while sharing so it can
 // always be stopped.
 export function screenButton(state: ScreenState, link: LinkState): ShareButton {
   const stopped = link === 'stopped'
   if (state.on && !stopped) return { hidden: false, disabled: state.busy, text: 'Parar', title: 'Parar de compartilhar a tela' }
-  const hidden = !state.meeting || stopped
-  if (state.taken) return { hidden, disabled: true, text: 'Compartilhar tela', title: 'Alguém da sala já está compartilhando' }
+  const hidden = !state.inZone || stopped
+  if (state.taken) return { hidden, disabled: true, text: 'Compartilhar tela', title: `Alguém da ${where(state)} já está compartilhando` }
   return {
     hidden,
     disabled: state.busy || link !== 'connected',
     text: 'Compartilhar tela',
-    title: 'Compartilhar tela com quem está na sala',
+    title: `Compartilhar tela com quem está na ${where(state)}`,
   }
 }
 

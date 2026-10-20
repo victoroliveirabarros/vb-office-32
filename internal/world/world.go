@@ -5,6 +5,7 @@ package world
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -31,6 +32,7 @@ var (
 	ErrUnknownPlayer = errors.New("unknown player")
 	ErrStaleSeq      = errors.New("stale input sequence")
 	ErrQueueFull     = errors.New("input queue full")
+	ErrUnknownZone   = errors.New("unknown zone")
 )
 
 type Dir string
@@ -81,7 +83,8 @@ type Input struct {
 // direction changed, sorted by ID; Acks holds the new ack of every player
 // that consumed an input; Zones holds the zone ID, "" outside, of every
 // player that changed zone; Nearby holds the sorted near set of every player
-// whose set changed since the previous Step.
+// whose set changed since the previous Step. A player moved out of a zone by
+// Lock is in Moved and Zones, with the inputs it lost acked.
 type Delta struct {
 	Tick   uint64
 	Moved  []Player
@@ -117,6 +120,12 @@ type Space struct {
 	nextSpawn int
 	tick      uint64
 
+	// access holds, per zone, who may enter it; nil is open to everyone.
+	access []map[string]struct{}
+	// forced holds the players Lock moved out since the last Step, with the
+	// ack of the inputs they lost, 0 for none.
+	forced map[string]uint32
+
 	near        map[string]map[string]struct{}
 	nearPending map[string]struct{}
 	nearBefore  map[string][]string
@@ -128,6 +137,8 @@ func NewSpace(m *tilemap.Map) *Space {
 		players: make(map[string]*player),
 		last:    make(map[string]lastSeen),
 		lastCap: maxLast,
+		access:  make([]map[string]struct{}, len(m.Zones)),
+		forced:  make(map[string]uint32),
 
 		near:        make(map[string]map[string]struct{}),
 		nearPending: make(map[string]struct{}),
@@ -142,13 +153,29 @@ func NewSpace(m *tilemap.Map) *Space {
 // connection is expected to read Nearby, so a pending change to that set is
 // not reported again by Step. A new player's near set is computed by the
 // next Step; its zone is set at once and, like a kept one, never reported in
-// Delta.Zones, since the new connection reads it with Zone.
+// Delta.Zones, since the new connection reads it with Zone. A player Lock
+// moved out is still reported by the next Step, so the others see it leave,
+// but without an ack. A last position in a zone id may not enter is traded
+// for the nearest tile outside.
 func (s *Space) Join(id, name string) Player {
+	return s.join(id, name, nil)
+}
+
+// JoinAt is Join with a new or returning player starting at at; a present
+// one keeps its position.
+func (s *Space) JoinAt(id, name string, at tilemap.Point) Player {
+	return s.join(id, name, &at)
+}
+
+func (s *Space) join(id, name string, at *tilemap.Point) Player {
 	if p, ok := s.players[id]; ok {
 		p.Name = name
 		p.queue = p.queue[:0]
 		p.lastSeq = 0
 		delete(s.nearBefore, id)
+		if _, ok := s.forced[id]; ok {
+			s.forced[id] = 0
+		}
 		return p.Player
 	}
 
@@ -159,7 +186,15 @@ func (s *Space) Join(id, name string) Player {
 	} else {
 		p.Pos = s.m.Spawns[s.nextSpawn%len(s.m.Spawns)]
 		p.Appearance = avatar.Default(id)
-		s.nextSpawn++
+		if at == nil {
+			s.nextSpawn++
+		}
+	}
+	if at != nil {
+		p.Pos = *at
+	}
+	if z := s.m.ZoneAt(p.Pos); z >= 0 && !s.allowed(z, id) {
+		p.Pos = s.m.Outside(p.Pos)
 	}
 	p.zone = s.m.ZoneAt(p.Pos)
 	s.players[id] = p
@@ -175,6 +210,7 @@ func (s *Space) Leave(id string) {
 	s.lastOrder++
 	s.last[id] = lastSeen{pos: p.Pos, dir: p.Dir, look: p.Appearance, order: s.lastOrder}
 	delete(s.players, id)
+	delete(s.forced, id)
 	s.dropNear(id)
 	if len(s.last) > s.lastCap {
 		s.evictOldest()
@@ -239,9 +275,29 @@ func (s *Space) Step(now time.Time) Delta {
 		check = append(check, id)
 	}
 	clear(s.nearPending)
+	for id, ack := range s.forced {
+		p := s.players[id]
+		d.Moved = append(d.Moved, p.Player)
+		if d.Zones == nil {
+			d.Zones = make(map[string]string)
+		}
+		d.Zones[id] = s.zoneID(p.zone)
+		if ack > 0 {
+			if d.Acks == nil {
+				d.Acks = make(map[string]uint32)
+			}
+			d.Acks[id] = ack
+		}
+		check = append(check, id)
+	}
 	for _, p := range s.players {
 		if now.Before(p.nextStep.Add(-stepSlack)) {
 			continue
+		}
+		if len(s.forced) > 0 {
+			if _, ok := s.forced[p.ID]; ok {
+				continue
+			}
 		}
 		if len(p.queue) == 0 {
 			p.nextStep = time.Time{}
@@ -253,30 +309,94 @@ func (s *Space) Step(now time.Time) Delta {
 
 		before := p.Player
 		p.Dir = in.Dir
+		// A zone id may not enter is as solid as a wall.
 		if to := p.Pos.Add(in.Dir.offset()); !s.m.Blocked(to) {
-			p.Pos = to
+			if z := s.m.ZoneAt(to); z == p.zone || s.allowed(z, p.ID) {
+				p.Pos = to
+				check = append(check, p.ID)
+				if z != p.zone {
+					p.zone = z
+					if d.Zones == nil {
+						d.Zones = make(map[string]string)
+					}
+					d.Zones[p.ID] = s.zoneID(z)
+				}
+			}
 		}
 		if p.Player != before {
 			d.Moved = append(d.Moved, p.Player)
-		}
-		if p.Pos != before.Pos {
-			check = append(check, p.ID)
-			if z := s.m.ZoneAt(p.Pos); z != p.zone {
-				p.zone = z
-				if d.Zones == nil {
-					d.Zones = make(map[string]string)
-				}
-				d.Zones[p.ID] = s.zoneID(z)
-			}
 		}
 		if d.Acks == nil {
 			d.Acks = make(map[string]uint32)
 		}
 		d.Acks[p.ID] = in.Seq
 	}
+	clear(s.forced)
 	slices.SortFunc(d.Moved, byID)
 	d.Nearby = s.stepNear(check, d.Zones)
 	return d
+}
+
+// Lock lets only ids into zone, nobody when ids is empty. Players inside
+// who may not stay are moved at once to the nearest tile outside, with their
+// pending inputs dropped, and lose at once the neighbors they no longer hear;
+// the next Step reports them and links their new neighbors.
+func (s *Space) Lock(zone string, ids ...string) error {
+	z := s.m.ZoneIndex(zone)
+	if z < 0 {
+		return fmt.Errorf("%w %q", ErrUnknownZone, zone)
+	}
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	s.access[z] = set
+	var out []string
+	for id, p := range s.players {
+		if p.zone != z || s.allowed(z, id) {
+			continue
+		}
+		p.Pos = s.m.Outside(p.Pos)
+		p.zone = s.m.ZoneAt(p.Pos)
+		p.queue = p.queue[:0]
+		p.nextStep = time.Time{}
+		s.forced[id] = p.lastSeq
+		out = append(out, id)
+	}
+	// Only once everyone is out, and without hysteresis, as Step does for a
+	// zone change.
+	for _, id := range out {
+		p := s.players[id]
+		for oid := range s.near[id] {
+			if !audible(p, s.players[oid], false) {
+				s.unlink(id, oid)
+			}
+		}
+	}
+	return nil
+}
+
+// allowed reports whether id may enter zone z, -1 being outside every zone.
+func (s *Space) allowed(z int, id string) bool {
+	if z < 0 || s.access[z] == nil {
+		return true
+	}
+	_, ok := s.access[z][id]
+	return ok
+}
+
+// Seat returns the tile of zone where its owner sits; false when there is
+// no such zone.
+func (s *Space) Seat(zone string) (tilemap.Point, bool) {
+	z := s.m.ZoneIndex(zone)
+	if z < 0 {
+		return tilemap.Point{}, false
+	}
+	return s.m.Seat(z), true
+}
+
+func (s *Space) Zones() []tilemap.Zone {
+	return slices.Clone(s.m.Zones)
 }
 
 // stepBase anchors the cadence on when the step was due rather than on now, so

@@ -9,6 +9,8 @@ import { TypingOwners } from '../chat/keys'
 import type { TypingGate, TypingOwner } from '../chat/keys'
 import { Names } from '../chat/names'
 import { Avatar } from '../entities/Avatar'
+import { deskGate } from '../game/desks'
+import type { Desks } from '../game/desks'
 import { Grid } from '../game/grid'
 import { Predictor, correctionFor } from '../game/prediction'
 import { ZoneMap } from '../game/zones'
@@ -42,6 +44,8 @@ export type SceneHooks = {
   zoom?: ZoomView
   /** A panel over the map, which the overview keeps clear of. */
   cover?: CoverSource
+  /** The desks, already updated when the scene reads a desk message. */
+  desks?: Pick<Desks, 'all' | 'get' | 'lockedForMe'>
 }
 
 export type CoverSource = {
@@ -50,7 +54,7 @@ export type CoverSource = {
   onChange(fn: () => void): () => void
 }
 
-const ZONE_COLORS: Record<MapZone['kind'], number> = { meeting: 0x014c8b, private: 0x7a3fb0 }
+const ZONE_COLORS: Record<Exclude<MapZone['kind'], 'desk'>, number> = { meeting: 0x014c8b, private: 0x7a3fb0 }
 // Yellow reads on every room's floor: blue and slate carpets, rubber.
 const ACCENT = 0xfdc339
 const SIGN_HEIGHT = 16
@@ -62,16 +66,37 @@ const SPOTLIGHT_FADE_MS = 400
 const SPOTLIGHT_PULSE_MS = 1000
 const SPOTLIGHT_DEPTH = 5000
 const NAVY = 0x00263e
+// Desk signs: a pill on the desk row, as wide as the station at most, with a
+// lock when the desk is closed to us, whose floor gets a veil.
+const DESK_SIGN = 0x0e3a58
+const DESK_SIGN_HEIGHT = 13
+const DESK_SIGN_PAD = 5
+const DESK_SIGN_MARGIN = 3
+const LOCK_WIDTH = 7
+const LOCK_GAP = 3
 const { LINEAR, NEAREST } = Phaser.Textures.FilterMode
 
 type Spotlight = { draw(g: Phaser.GameObjects.Graphics, zoom: number, pulse: number): void; from: number }
+
+type DeskSign = {
+  zone: MapZone
+  area: Phaser.Geom.Rectangle
+  sign: Phaser.GameObjects.Container
+  plate: Phaser.GameObjects.Graphics
+  lock: Phaser.GameObjects.Graphics
+  label: Phaser.GameObjects.Text
+  veil: Phaser.GameObjects.Graphics
+  text: string
+  locked: boolean
+}
 
 type ZoneView = {
   zone: MapZone
   area: Phaser.Geom.Rectangle
   outline: Phaser.GameObjects.Graphics
-  sign: Phaser.GameObjects.Container
-  label: Phaser.GameObjects.Text
+  // Desks have no sign.
+  sign: Phaser.GameObjects.Container | null
+  label: Phaser.GameObjects.Text | null
 }
 
 export class OfficeScene extends Phaser.Scene implements TypingGate {
@@ -81,6 +106,8 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private readonly names = new Map<string, string>()
   private labels = new Names([])
   private zoneViews: ZoneView[] = []
+  private deskSigns: DeskSign[] = []
+  private zoneMap = ZoneMap.empty()
   private zoneId = ''
   private selfId: string | null = null
   private predictor: Predictor | null = null
@@ -245,6 +272,9 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       case 'zone':
         this.zoneId = msg.d.id
         return this.highlightZone()
+      case 'desks':
+      case 'deskInvite':
+        return this.refreshDesks()
       case 'pong':
         return this.hud.setLatency(performance.now() - msg.d.ts)
       case 'appearance':
@@ -289,6 +319,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const avatar = this.self()
     if (!self || !avatar) return
     this.predictor = new Predictor(this.grid, self)
+    this.refreshDesks()
     this.following = false
     this.placeCamera()
   }
@@ -345,16 +376,87 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   }
 
   // The floor already marks each room: our room gets a thin yellow outline,
-  // and every room a sign in its kind's color on the wall above it.
+  // and every room but the desks a sign in its kind's color on the wall
+  // above it. Desks get theirs on the desk itself.
   private drawZones(zones: ZoneMap): void {
+    this.zoneMap = zones
     this.zoneViews = zones.zones.map((zone) => {
       const { x0, y0, x1, y1 } = zone.tiles
       const area = new Phaser.Geom.Rectangle(x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 - x0) * TILE_SIZE, (y1 - y0) * TILE_SIZE)
       const outline = this.add.graphics().setDepth(4)
+      if (zone.kind === 'desk') {
+        this.deskSigns.push(this.deskSign(zone, area))
+        return { zone, area, outline, sign: null, label: null }
+      }
       const [sign, label] = this.zoneSign(zone.name, ZONE_COLORS[zone.kind])
       return { zone, area, outline, sign, label }
     })
     this.highlightZone()
+  }
+
+  // On the row of the station that is all desk, else the middle one.
+  private deskSign(zone: MapZone, area: Phaser.Geom.Rectangle): DeskSign {
+    const { x0, y0, x1, y1 } = zone.tiles
+    const range = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i)
+    const row = range(y0, y1).find((y) => range(x0, x1).every((x) => this.grid.isBlocked(x, y))) ?? y0 + Math.floor((y1 - y0) / 2)
+    const veil = this.add.graphics().setDepth(3.5).fillStyle(NAVY, 0.1).fillRect(area.x, area.y, area.width, area.height).setVisible(false)
+    const plate = this.add.graphics()
+    const lock = this.add.graphics()
+    const label = this.add
+      .text(0, 0, '', {
+        fontFamily: '"Montserrat", system-ui, sans-serif',
+        fontSize: '9px',
+        fontStyle: '700',
+        color: '#ffffff',
+        resolution: this.textResolution(),
+      })
+      .setOrigin(0, 0.5)
+    label.texture.setFilter(LINEAR)
+    const sign = this.add.container(area.centerX, row * TILE_SIZE + TILE_SIZE / 2, [plate, lock, label]).setDepth(4)
+    return { zone, area, sign, plate, lock, label, veil, text: zone.name, locked: false }
+  }
+
+  // The owner's name, or the desk's own for one without an owner; the gate
+  // the prediction walks by mirrors who the server lets in.
+  private refreshDesks(): void {
+    const desks = this.hooks.desks
+    if (!desks) return
+    const locked = new Set(desks.all().flatMap((d) => (desks.lockedForMe(d.id) ? [d.id] : [])))
+    this.predictor?.setGate(deskGate(this.zoneMap, (id) => locked.has(id)))
+    for (const sign of this.deskSigns) {
+      const desk = desks.get(sign.zone.id)
+      sign.text = desk?.locked && desk.ownerName ? desk.ownerName : sign.zone.name
+      sign.locked = locked.has(sign.zone.id)
+      sign.veil.setVisible(sign.locked)
+      this.layoutDeskSign(sign)
+    }
+  }
+
+  // Sized like the room signs, at least 1× on screen; the name is cut to the
+  // station's width at the current zoom.
+  private layoutDeskSign(sign: DeskSign): void {
+    const scale = keepOnScreen(1, this.cameras.main.zoom)
+    const lockWidth = sign.locked ? LOCK_WIDTH + LOCK_GAP : 0
+    fitText(sign.label, sign.text, (sign.area.width - 2 * DESK_SIGN_MARGIN) / scale - 2 * DESK_SIGN_PAD - lockWidth)
+    const width = Math.ceil(sign.label.width) + 2 * DESK_SIGN_PAD + lockWidth
+    const left = -width / 2
+    sign.plate
+      .clear()
+      .fillStyle(DESK_SIGN, 0.9)
+      .fillRoundedRect(left, -DESK_SIGN_HEIGHT / 2, width, DESK_SIGN_HEIGHT, 4)
+    sign.lock.clear().setVisible(sign.locked)
+    if (sign.locked) {
+      const x = left + DESK_SIGN_PAD
+      sign.lock
+        .lineStyle(1.4, ACCENT, 1)
+        .beginPath()
+        .arc(x + LOCK_WIDTH / 2, -1, 2.2, Math.PI, 0)
+        .strokePath()
+        .fillStyle(ACCENT, 1)
+        .fillRoundedRect(x, -1, LOCK_WIDTH, 5, 1)
+    }
+    sign.label.setX(left + DESK_SIGN_PAD + lockWidth)
+    sign.sign.setScale(scale).setSize(width, DESK_SIGN_HEIGHT)
   }
 
   // Below 1× the outline keeps its 1× size on screen and so do the signs.
@@ -365,12 +467,14 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
   private scaleZones(zoom: number): void {
     const scale = keepOnScreen(1, zoom)
     this.signsInside = SIGN_HEIGHT * scale > TILE_SIZE
-    for (const { area, outline, sign } of this.zoneViews) {
+    for (const { zone, area, outline, sign } of this.zoneViews) {
       const inset = 2 * scale
+      const desk = zone.kind === 'desk'
       outline
         .clear()
-        .lineStyle(2 * scale, ACCENT, 0.85)
-        .strokeRoundedRect(area.x + inset, area.y + inset, area.width - 2 * inset, area.height - 2 * inset, 8 * scale)
+        .lineStyle((desk ? 1.5 : 2) * scale, ACCENT, desk ? 0.6 : 0.85)
+        .strokeRoundedRect(area.x + inset, area.y + inset, area.width - 2 * inset, area.height - 2 * inset, (desk ? 6 : 8) * scale)
+      if (!sign) continue
       if (!this.signsInside) {
         sign.setScale(scale).setPosition(area.x + SIGN_INSET, Math.max((SIGN_HEIGHT * scale) / 2, area.y - TILE_SIZE / 2))
         continue
@@ -381,6 +485,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
       const x = Math.min(area.x + margin, this.mapSize.width - margin - sign.width * signScale)
       sign.setScale(signScale).setPosition(x, area.bottom - margin - (SIGN_HEIGHT * signScale) / 2)
     }
+    for (const sign of this.deskSigns) this.layoutDeskSign(sign)
     this.highlightZone()
   }
 
@@ -409,7 +514,7 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     for (const { zone, outline, sign } of this.zoneViews) {
       const here = zone.id === this.zoneId
       outline.setVisible(here)
-      sign.setAlpha(here || this.signsInside ? 1 : 0.8)
+      sign?.setAlpha(here || this.signsInside ? 1 : 0.8)
     }
   }
 
@@ -538,9 +643,9 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     this.rescale()
     const resolution = this.textResolution()
     this.avatars.forEach((avatar) => avatar.refreshLabel())
-    for (const { label } of this.zoneViews) {
-      label.setResolution(resolution)
-      label.texture.setFilter(LINEAR)
+    for (const { label } of [...this.zoneViews, ...this.deskSigns]) {
+      label?.setResolution(resolution)
+      label?.texture.setFilter(LINEAR)
     }
   }
 
@@ -601,4 +706,10 @@ export class OfficeScene extends Phaser.Scene implements TypingGate {
     const { x, y, width, height } = cameraBounds(this.viewSize(), this.mapSize, camera.zoom)
     camera.setBounds(x, y, width, height)
   }
+}
+
+// Cuts text with "…" until it fits width; the empty string when nothing does.
+function fitText(label: Phaser.GameObjects.Text, text: string, width: number): void {
+  label.setText(text)
+  for (let n = text.length - 1; label.width > width && n >= 0; n--) label.setText(n === 0 ? '' : `${text.slice(0, n).trimEnd()}…`)
 }

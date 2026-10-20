@@ -11,7 +11,7 @@
   "tileheight": 32,
   "compressionlevel": -1,
   "nextlayerid": 7,
-  "nextobjectid": 16,
+  "nextobjectid": 28,
   "layers": [
     {
       "id": 1,
@@ -337,6 +337,282 @@
               "value": "private"
             }
           ]
+        },
+        {
+          "id": 14,
+          "name": "Mesa 1",
+          "type": "",
+          "x": 480,
+          "y": 416,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-01"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "name": "Mesa 2",
+          "type": "",
+          "x": 576,
+          "y": 416,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-02"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 16,
+          "name": "Mesa 3",
+          "type": "",
+          "x": 672,
+          "y": 416,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-03"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 17,
+          "name": "Mesa 4",
+          "type": "",
+          "x": 480,
+          "y": 480,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-04"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 18,
+          "name": "Mesa 5",
+          "type": "",
+          "x": 576,
+          "y": 480,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-05"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "name": "Mesa 6",
+          "type": "",
+          "x": 672,
+          "y": 480,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-06"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 20,
+          "name": "Mesa 7",
+          "type": "",
+          "x": 832,
+          "y": 416,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-07"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 21,
+          "name": "Mesa 8",
+          "type": "",
+          "x": 928,
+          "y": 416,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-08"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 22,
+          "name": "Mesa 9",
+          "type": "",
+          "x": 1024,
+          "y": 416,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-09"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 23,
+          "name": "Mesa 10",
+          "type": "",
+          "x": 832,
+          "y": 480,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-10"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 24,
+          "name": "Mesa 11",
+          "type": "",
+          "x": 928,
+          "y": 480,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-11"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
+        },
+        {
+          "id": 25,
+          "name": "Mesa 12",
+          "type": "",
+          "x": 1024,
+          "y": 480,
+          "width": 96,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "id",
+              "type": "string",
+              "value": "mesa-12"
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "desk"
+            }
+          ]
         }
       ]
     },
@@ -351,7 +627,7 @@
       "visible": true,
       "objects": [
         {
-          "id": 14,
+          "id": 26,
           "name": "Copa",
           "type": "",
           "x": 864,
@@ -369,7 +645,7 @@
           ]
         },
         {
-          "id": 15,
+          "id": 27,
           "name": "Escritório aberto",
           "type": "",
           "x": 384,

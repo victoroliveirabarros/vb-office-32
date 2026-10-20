@@ -8,6 +8,7 @@ import { counterText, failureText, personAriaLabel, personTag, tabAriaLabel, tab
 
 const SALA: Room = { id: 'sala-1', name: 'Sala 1', kind: 'meeting' }
 const SALA2: Room = { id: 'sala-2', name: 'Sala 2', kind: 'meeting' }
+const MESA: Room = { id: 'mesa-01', name: 'Mesa de Ana', kind: 'desk' }
 
 const roster = (names: Record<string, string>, nearby: string[] = [], room: Room | null = null) => ({
   online: (id: string) => id in names,
@@ -65,6 +66,14 @@ describe('chat view', () => {
     const nearby = tab({ key: 'nearby', scope: 'nearby' })
     expect(tabNotice(nearby, roster({}, [], SALA)).text).toBe('Visível só para quem está na sala. Ninguém mais aqui agora; só você verá.')
     expect(tabNotice(nearby, roster({ a: 'Ana', b: 'Bia' }, ['a', 'b'], SALA)).text).toBe('Visível só para quem está na sala: Ana, Bia.')
+  })
+
+  it('names the nearby tab after the desk and says the desk sees it', () => {
+    const nearby = tab({ key: 'nearby', scope: 'nearby' })
+    expect(tabLabel(nearby, roster({}, [], MESA))).toBe('Mesa de Ana')
+    expect(tabNotice(nearby, roster({}, [], MESA)).text).toBe('Visível só para quem está na mesa. Ninguém mais aqui agora; só você verá.')
+    expect(tabNotice(nearby, roster({ a: 'Ana' }, ['a'], MESA)).text).toBe('Visível só para quem está na mesa: Ana.')
+    expect(personTag(person({ nearby: true, room: MESA }), roster({ a: 'Ana' }, ['a'], MESA))).toEqual({ text: 'na mesa', kind: 'room' })
   })
 
   it('tags people in our room, near us or in another room', () => {

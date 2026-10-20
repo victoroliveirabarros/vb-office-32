@@ -31,7 +31,8 @@ table in the [README](../README.md#configuration). In production:
 - Invalid values make the process exit at boot with an error naming the
   variable, never its value.
 - Keep `VB_OFFICE32_AUTH` at its default, `oidc`. Guest mode lets anyone in
-  under any name.
+  under any name, and refuses to boot with desk owners unless
+  `VB_OFFICE32_ADDR` is on `localhost` or `127.0.0.1`.
 
 ## Login (OIDC)
 
@@ -127,6 +128,35 @@ so it may go through the public ingress; an internal URL works as well when
 LiveKit runs in the same network. Without webhooks the periodic list still
 removes intruders, only up to a minute later.
 
+## Desk owners (optional)
+
+Desks with an owner are closed to everyone but the owner and the owner's
+guests (see the [README](../README.md#desks)). The owners come from a JSON
+file, read once at boot; `VB_OFFICE32_DESKS` takes the same JSON inline
+for setups without files.
+
+```json
+{"mesa-01": {"email": "ana@example.com", "name": "Ana Souza"}}
+```
+
+On Kubernetes keep it in a ConfigMap mounted read-only, which works with
+`readOnlyRootFilesystem`, and point `VB_OFFICE32_DESKS_FILE` at it (see the
+example below). The file holds emails: keep it out of public repositories
+and out of the image. Changing it takes a new rollout: a `checksum/desks`
+annotation on the pod template, a hash of the file, makes every change roll
+the pod (with the Helm chart, `{{ include (print $.Template.BasePath
+"/desks.yaml") . | sha256sum }}`), and the `Recreate` strategy keeps a
+single process deciding who owns what. A bad file stops the new pod at
+boot with the variable and the desk id in the error, never the email, while
+`Recreate` has already stopped the old one: check it before deploying.
+
+Sessions carry an HMAC tag of the verified email, never the email, and the
+running configuration decides on every connection, so moving a desk to
+someone else takes effect at once for new connections. Sessions from before
+desks existed get their desk at the next login, within 12 hours. The tag
+key is derived from `VB_OFFICE32_SESSION_KEY`, and the rotation above keeps
+tags of the previous key working.
+
 ## Security headers
 
 All responses carry CSP, `X-Content-Type-Options`, `Referrer-Policy`,
@@ -220,8 +250,14 @@ spec:
         app: vb-office-32
       annotations:
         karpenter.sh/do-not-disrupt: "true"
+        # sha256 of desks.json, so a change rolls the pod
+        checksum/desks: "<sha256>"
     spec:
       terminationGracePeriodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: vb-office-32-desks
       containers:
         - name: vb-office-32
           image: <registry>/vb-office-32:<tag>
@@ -237,6 +273,12 @@ spec:
               value: https://office.example.com
             - name: VB_OFFICE32_ALLOWED_DOMAINS
               value: example.com
+            - name: VB_OFFICE32_DESKS_FILE
+              value: /app/config/desks.json
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
           envFrom:
             # VB_OFFICE32_OIDC_CLIENT_ID, VB_OFFICE32_OIDC_CLIENT_SECRET
             # and VB_OFFICE32_SESSION_KEY
@@ -260,6 +302,14 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vb-office-32-desks
+data:
+  desks.json: |
+    {"mesa-01": {"email": "ana@example.com", "name": "Ana Souza"}}
 ---
 apiVersion: v1
 kind: Service

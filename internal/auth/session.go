@@ -26,6 +26,8 @@ type sessionPayload struct {
 	Name   string `json:"name"`
 	Domain string `json:"domain"`
 	HD     string `json:"hd,omitempty"`
+	// ET tags the verified email for desk ownership; see deskTag.
+	ET string `json:"et,omitempty"`
 }
 
 // Authenticate reads the session cookie. Domains are checked again on every
@@ -42,19 +44,24 @@ func (o *OIDC) Authenticate(r *http.Request) (Identity, error) {
 	if checkDomains(p.Domain, p.HD, o.domains, o.requireHD) != nil || !validSubject(p.Sub) {
 		return Identity{}, ErrNoSession
 	}
-	return Identity{ID: oidcIdentPrefix + p.Sub, Name: p.Name, Expires: time.Unix(p.Exp, 0)}, nil
+	return Identity{ID: oidcIdentPrefix + p.Sub, Name: p.Name, Expires: time.Unix(p.Exp, 0), Desk: o.deskTags[p.ET]}, nil
 }
 
-// setSession keeps only the email domain; the display name fallback is taken
-// from the email here, before it is discarded.
+// setSession keeps only the email domain and, for a verified email, its desk
+// tag; the display name fallback is taken from the email here, before it is
+// discarded.
 func (o *OIDC) setSession(w http.ResponseWriter, c idClaims) error {
-	token, err := o.session.seal(&sessionPayload{
+	p := &sessionPayload{
 		header: newHeader(o.now().Add(sessionTTL)),
 		Sub:    c.Sub,
 		Name:   displayName(c.Name, c.Email),
 		Domain: emailDomain(c.Email),
 		HD:     c.HD,
-	})
+	}
+	if c.EmailVerified && p.Domain != "" {
+		p.ET = deskTag(o.deskKeys[0], c.Email)
+	}
+	token, err := o.session.seal(p)
 	if err != nil {
 		return err
 	}

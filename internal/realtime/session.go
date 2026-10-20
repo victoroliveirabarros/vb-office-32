@@ -57,9 +57,11 @@ type Session struct {
 	id      string
 	name    string
 	expires time.Time
-	conn    *websocket.Conn
-	room    *Room
-	log     *slog.Logger
+	// desk is the desk the identity owns, "" for none.
+	desk string
+	conn *websocket.Conn
+	room *Room
+	log  *slog.Logger
 
 	// look is the appearance asked for in the URL, applied when joining;
 	// nil keeps the remembered or default one.
@@ -79,6 +81,7 @@ func newSession(id auth.Identity, conn *websocket.Conn, room *Room, limits sessi
 		id:      id.ID,
 		name:    id.Name,
 		expires: id.Expires,
+		desk:    id.Desk,
 		conn:    conn,
 		room:    room,
 		log:     log,
@@ -181,6 +184,10 @@ func (s *Session) readLoop(ctx context.Context) error {
 			if err := s.appearance(ctx, avatar.Appearance(m), time.Now()); err != nil {
 				return err
 			}
+		case deskIn:
+			if err := s.deskRequest(ctx, m, time.Now()); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -223,6 +230,24 @@ func (s *Session) appearance(ctx context.Context, a avatar.Appearance, now time.
 		req.apply = true
 	}
 	return s.room.appearance(ctx, req)
+}
+
+// deskRequest hands an invite or a revocation to the room, which checks that
+// the sender owns its desk. One without a target, to the sender, from an
+// identity without a desk or over its limit is dropped; the target never
+// reaches the log.
+func (s *Session) deskRequest(ctx context.Context, m deskIn, now time.Time) error {
+	switch {
+	case s.desk == "":
+		s.log.Debug("desk request ignored", "reason", "no desk")
+	case m.Target == "" || len(m.Target) > maxToLen || m.Target == s.id:
+		s.log.Debug("desk request ignored", "reason", chatInvalid)
+	case !s.limits.desk.allow(s.id, now):
+		s.log.Debug("desk request ignored", "reason", chatRateLimited)
+	default:
+		return s.room.deskRequest(ctx, sessionDesk{sess: s, target: m.Target, invite: m.invite})
+	}
+	return nil
 }
 
 func (s *Session) sendChatError(cid, reason string) {

@@ -61,7 +61,8 @@ do catálogo: **CC0 1.0**.
 - **Lucide** 1.59.0 (`lucide-static`, https://lucide.dev), licença **ISC**, © Lucide
   Icons and Contributors; os ícones derivados do Feather (aqui `log-out`, `x`,
   `circle-alert`, antes `alert-circle`, `zoom-in`, `zoom-out`, `map`, `search`,
-  `monitor`, `moon` e `lock`) também sob
+  `monitor`, `moon`, `lock`, `lock-open`, antes `unlock`, `user-plus` e
+  `user-minus`) também sob
   **MIT**, © 2013-present Cole Bemis. Sprite `web/public/icons.svg` só com os
   símbolos usados, montado a partir de `icons/*.svg` do pacote sem alterar os
   desenhos; licença completa em `web/public/icons-LICENSE.txt`.

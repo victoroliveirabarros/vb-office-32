@@ -45,7 +45,11 @@ func serveMap(t *testing.T, mapID string, authn Authenticator, maxSessions int, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	room := NewRoom(DefaultSpace, mapID, world.NewSpace(m), mi, log)
+	return serveRoom(t, NewRoom(DefaultSpace, mapID, world.NewSpace(m), mi, log), authn, maxSessions, log)
+}
+
+func serveRoom(t *testing.T, room *Room, authn Authenticator, maxSessions int, log *slog.Logger) string {
+	t.Helper()
 	hub := NewHub(room)
 
 	ctx, cancel := context.WithCancel(context.Background())

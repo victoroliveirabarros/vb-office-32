@@ -1,10 +1,11 @@
 // Development-only check of the sidebar (phase 6.4): expanding, collapsing
-// and remembering it; each panel (chat, people, rooms, settings); a direct
-// message from the people list; "Ver no mapa" and the rooms' overview with
-// the mark on the map; the theme; devices with media on; the drawer on a
-// phone with focus held in it; the keyboard (Alt+1…5, Esc, fields holding
-// the game's keys); no CSP violations; screenshots of every panel, light
-// and dark, expanded and collapsed, at 1280×800, 1920×1080 and 390×844.
+// and remembering it; each panel (chat, people, rooms and desks, settings);
+// a direct message from the people list; "Ver no mapa" and the rooms'
+// overview with the mark on the map; the theme; devices with media on; the
+// drawer on a phone with focus held in it; the keyboard (Alt+1…5, Esc,
+// fields holding the game's keys); no CSP violations; screenshots of every
+// panel, light and dark, expanded and collapsed, at 1280×800, 1920×1080 and
+// 390×844.
 // Needs the server in guest mode serving the app build (npm run build),
 // with LiveKit for the device checks (they are skipped without media), then:
 //
@@ -477,6 +478,16 @@ async function desktop(cdp) {
       rooms[3].here &&
       (await ana.active()) === 'nav-rooms',
     { s, rooms },
+  )
+  const desks = await ana.eval(`[...document.querySelectorAll('#desks-list .room')].map((li) => ({ name: li.querySelector('.room-name').textContent, meta: li.querySelector('.room-meta').textContent }))`)
+  check(
+    'Salas lists the desks apart, after the rooms: without owners, all free',
+    !(await ana.eval(`document.getElementById('desks-section').hidden`)) &&
+      desks.length === 12 &&
+      desks[0].name === 'Mesa 1' &&
+      desks[11].name === 'Mesa 12' &&
+      desks.every((d) => d.meta === 'Livre · Vazia'),
+    desks,
   )
   await ana.key('Escape')
   await sleep(SETTLE)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/victoroliveirabarros/vb-office-32/internal/chat"
 	"github.com/victoroliveirabarros/vb-office-32/internal/media"
+	"github.com/victoroliveirabarros/vb-office-32/internal/tilemap"
 	"github.com/victoroliveirabarros/vb-office-32/internal/world"
 )
 
@@ -23,8 +24,12 @@ const (
 	// removeGrace is how long an identity that left keeps its media
 	// connection, so a reconnecting WebSocket does not drop the call.
 	removeGrace = 30 * time.Second
-	chatBuffer  = 64
-	lookBuffer  = 64
+	// deskGrace is how long a desk stays open to its guests after its owner
+	// left, media or not.
+	deskGrace  = removeGrace
+	chatBuffer = 64
+	lookBuffer = 64
+	deskBuffer = 64
 )
 
 var errRoomClosed = errors.New("room closed")
@@ -71,6 +76,8 @@ type Room struct {
 	inputs   chan sessionInput
 	chats    chan sessionChat
 	looks    chan sessionAppearance
+	deskReqs chan sessionDesk
+	expiries chan deskExpiry
 	removals chan removal
 	listed   chan []string
 	arrived  chan string
@@ -90,10 +97,15 @@ type Room struct {
 	// historyMsg caches the encoded chatHistory until the next everyone
 	// message.
 	historyMsg []byte
+
+	// desks are the desk zones in map order, also by id in byDesk.
+	desks     []*deskState
+	byDesk    map[string]*deskState
+	deskGrace time.Duration
 }
 
 func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *Room {
-	return &Room{
+	r := &Room{
 		id:       id,
 		mapID:    mapID,
 		space:    space,
@@ -104,6 +116,8 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 		inputs:   make(chan sessionInput, 256),
 		chats:    make(chan sessionChat, chatBuffer),
 		looks:    make(chan sessionAppearance, lookBuffer),
+		deskReqs: make(chan sessionDesk, deskBuffer),
+		expiries: make(chan deskExpiry),
 		removals: make(chan removal),
 		listed:   make(chan []string),
 		arrived:  make(chan string),
@@ -115,7 +129,17 @@ func NewRoom(id, mapID string, space *world.Space, mi Media, log *slog.Logger) *
 		checkEvery: mediaCheck,
 		ids:        chat.NewIDs(),
 		everyone:   newTokenBucket(everyoneRate, everyoneBurst),
+		byDesk:     make(map[string]*deskState),
+		deskGrace:  deskGrace,
 	}
+	for _, z := range space.Zones() {
+		if z.Kind == tilemap.Desk {
+			d := &deskState{id: z.ID, zone: z.Name, guests: make(map[string]string)}
+			r.desks = append(r.desks, d)
+			r.byDesk[z.ID] = d
+		}
+	}
+	return r
 }
 
 func (r *Room) Run(ctx context.Context) error {
@@ -144,6 +168,10 @@ func (r *Room) Run(ctx context.Context) error {
 			r.handleChat(c)
 		case a := <-r.looks:
 			r.handleAppearance(a)
+		case q := <-r.deskReqs:
+			r.handleDesk(q)
+		case e := <-r.expiries:
+			r.handleDeskExpiry(e)
 		case rm := <-r.removals:
 			r.handleRemoval(ctx, rm)
 		case ids := <-r.listed:
@@ -166,6 +194,9 @@ func (r *Room) Run(ctx context.Context) error {
 func (r *Room) shutdown() {
 	for id := range r.pending {
 		r.cancelRemoval(id)
+	}
+	for _, d := range r.desks {
+		d.stopGrace()
 	}
 	defer r.removing.Wait()
 	for _, m := range r.members {
@@ -211,7 +242,15 @@ func (r *Room) handleJoin(s *Session) {
 		old.sess.close(statusReplaced, reasonReplaced)
 	}
 	r.cancelRemoval(s.id)
-	self := r.space.Join(s.id, s.name)
+	desk, returning, deskChanged := r.claimDesk(s)
+	// An owner sits down on arrival, not on a new tab or coming back in time.
+	var self world.Player
+	if desk != nil && !replaced && !returning {
+		seat, _ := r.space.Seat(desk.id)
+		self = r.space.JoinAt(s.id, s.name, seat)
+	} else {
+		self = r.space.Join(s.id, s.name)
+	}
 	var newLook bool
 	if s.look != nil {
 		self, newLook = r.space.SetAppearance(s.id, *s.look)
@@ -241,12 +280,19 @@ func (r *Room) handleJoin(s *Session) {
 		r.sendMedia(m, time.Now())
 	}
 	r.sendZone(s)
+	r.sendDesksOnJoin(s, desk)
 	r.sendNearby(s, r.space.Nearby(s.id))
 	r.sendHistory(s)
-	r.log.Info("player joined", "id", s.id, "replaced", replaced)
+	r.log.Info("player joined", "id", s.id, "replaced", replaced, "desk", deskID(desk))
 
 	if !replaced || old.sess.name != s.name || newLook {
 		r.broadcast(typeJoined, newPlayerMsg(self), s.id)
+	}
+	if deskChanged {
+		r.broadcast(typeDesks, r.desksMsg(), s.id)
+	}
+	if !replaced || old.sess.name != s.name {
+		r.guestChanged(s.id, s.name)
 	}
 }
 
@@ -258,6 +304,7 @@ func (r *Room) handleLeave(s *Session) {
 	r.space.Leave(s.id)
 	r.log.Info("player left", "id", s.id)
 	r.broadcast(typeLeft, leftMsg{ID: s.id}, "")
+	r.leaveDesks(s.id)
 	if r.media != nil {
 		r.scheduleRemoval(s.id)
 	}

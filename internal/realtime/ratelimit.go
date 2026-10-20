@@ -19,6 +19,10 @@ const (
 	appearanceRate  = 0.2
 	appearanceBurst = 3
 
+	// Desk invites and revocations share the chat limits, per identity.
+	deskRate  = chatRate
+	deskBurst = chatBurst
+
 	// everyoneRate caps the everyone chats of a whole room, so many
 	// senders together cannot outrun the recipients' send buffers.
 	everyoneRate  = 20
@@ -102,11 +106,13 @@ func (l *identityLimits) allow(id string, now time.Time) bool {
 type sessionLimits struct {
 	chat       *identityLimits
 	appearance *identityLimits
+	desk       *identityLimits
 }
 
 func newSessionLimits() sessionLimits {
 	return sessionLimits{
 		chat:       newIdentityLimits(chatRate, chatBurst),
 		appearance: newIdentityLimits(appearanceRate, appearanceBurst),
+		desk:       newIdentityLimits(deskRate, deskBurst),
 	}
 }

@@ -1,11 +1,18 @@
 import type { Room } from '../game/zones'
 import type { ZoneKind } from '../net/protocol'
 
-const KIND_TEXT: Record<ZoneKind, string> = { meeting: 'reunião', private: 'privada' }
+const KIND_TEXT: Record<ZoneKind, string> = { meeting: 'reunião', private: 'privada', desk: 'mesa' }
 
+// The share button shows in every zone with media, so no hint names it.
 const KIND_HINT: Record<ZoneKind, string> = {
-  meeting: 'Só quem está na sala ouve, vê e lê o chat “Perto”; dá para compartilhar a tela.',
+  meeting: 'Só quem está na sala ouve, vê e lê o chat “Perto”.',
   private: 'Só quem está aqui ouve, vê e lê o chat “Perto”.',
+  desk: 'Só quem está na mesa ouve, vê e lê o chat “Perto”.',
+}
+
+/** What the texts call the zone we are in: "na mesa", "da sala". */
+export function zoneWord(kind: ZoneKind | undefined): 'mesa' | 'sala' {
+  return kind === 'desk' ? 'mesa' : 'sala'
 }
 
 /** "Ringue de box — privada"; just "Sala privada" when the name says it. */

@@ -6,7 +6,8 @@ import { avatarPrefs } from './avatar/prefs'
 import { rosterFeed } from './chat/feed'
 import { TypingOwners } from './chat/keys'
 import type { TypingGate } from './chat/keys'
-import { toRoom } from './game/zones'
+import { sameRoom } from './game/zones'
+import type { Room } from './game/zones'
 import { MediaClient } from './media/client'
 import type { MediaRoom, RoomListener } from './media/client'
 import { devicePrefs } from './media/devices'
@@ -30,10 +31,12 @@ import { askName } from './ui/join'
 import { showLogin } from './ui/login'
 import { createMediaView } from './ui/media'
 import { createPeople } from './ui/people'
+import { createPersonPopover } from './ui/popover'
 import { createProfile } from './ui/profile'
 import { createRooms } from './ui/rooms'
 import { createSettings } from './ui/settings'
 import { createSidebar } from './ui/sidebar'
+import { createToasts } from './ui/toast'
 import { createZoomControls } from './ui/zoom'
 
 const themes = themePrefs()
@@ -85,10 +88,6 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>, onLo
     if (status === 'expired') location.assign('/')
   })
 
-  connection.onMessage((msg) => {
-    if (msg.t === 'zone') hud.setZone(toRoom(msg.d))
-  })
-
   // The chat, the avatar editor and the panels' fields take the keyboard
   // from the scene, which opens the chat on a click on someone's avatar.
   const owners = new TypingOwners()
@@ -100,6 +99,14 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>, onLo
   }
   // Before the chat and the panels, which read it on the same messages.
   const feed = rosterFeed(connection)
+  // The strip names a desk after its owner, which the roster knows.
+  let strip: Room | null = null
+  feed.onChange(() => {
+    const room = feed.roster.room
+    if (sameRoom(room, strip)) return
+    strip = room
+    hud.setZone(room)
+  })
   const heads = createHeads()
   const editor = createAvatarEditor(connection, prefs, gate)
   const sidebar = createSidebar(sidebarPrefs(), gate, {
@@ -115,6 +122,7 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>, onLo
     sidebar.revealMap()
     show()
   }
+  const invite = (id: string, on: boolean) => connection.send({ t: on ? 'deskInvite' : 'deskRevoke', d: { target: id } })
   createPeople(
     feed,
     heads,
@@ -122,10 +130,13 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>, onLo
     {
       message: (id) => chat.openDirect(id),
       locate: (id) => showOnMap(() => office.showPerson(id)),
+      invite,
     },
     (n) => sidebar.setCount('people', n),
   )
-  const rooms = createRooms(feed, heads, (tiles) => showOnMap(() => office.showPlace(tiles)))
+  const popover = createPersonPopover(feed, heads, { message: (id) => chat.openDirect(id), invite })
+  createToasts(connection)
+  const rooms = createRooms(feed, heads, (tiles) => showOnMap(() => office.showPlace(tiles)), (id) => invite(id, false))
   createProfile(feed, heads)
   const settings = createSettings(themes, devices, { resetZoom: () => office.resetZoom(), logout: onLogout })
   settings.bindMedia(media)
@@ -141,7 +152,9 @@ async function start(hud: Hud, connection: Connection, font: Promise<void>, onLo
       feed.setZones(zones)
       rooms.setZones(zones)
     },
-    picked: (id) => chat.openDirect(id),
+    // With a desk of ours the click also offers an invite.
+    picked: (id) => (feed.roster.desks.mine() ? popover.open(id) : chat.openDirect(id)),
+    desks: feed.roster.desks,
     zoom: createZoomControls(),
     cover: coverOf(requireElement('panel', HTMLElement), game, window.matchMedia(DOCKED_QUERY)),
   })

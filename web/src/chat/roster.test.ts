@@ -153,4 +153,27 @@ describe('Roster', () => {
     expect(roster.label('oidc:1')).toBe('Ana')
     expect(roster.label('oidc:3')).toBeUndefined()
   })
+
+  it('names desks after their owners, ours from the server and the others from the map', () => {
+    const map = new ZoneMap(6, 2, [
+      { id: 'mesa-01', name: 'Mesa 1', kind: 'desk', tiles: { x0: 0, y0: 0, x1: 3, y1: 1 } },
+      { id: 'mesa-02', name: 'Mesa 2', kind: 'desk', tiles: { x0: 3, y0: 0, x1: 6, y1: 1 } },
+    ])
+    const roster = new Roster()
+    roster.setZones(map)
+    roster.handle(welcome('guest:eve', [player('guest:eve', 'eve', 1, 0), player('guest:bob', 'bob', 4, 0)]))
+    roster.handle({ t: 'zone', d: { id: 'mesa-01', name: 'Mesa 1', kind: 'desk' } })
+    expect(roster.room).toEqual({ id: 'mesa-01', name: 'Mesa 1', kind: 'desk' })
+
+    const ana = { id: 'mesa-01', ownerId: 'guest:ana', ownerName: 'ana', online: true, locked: true }
+    expect(roster.handle({ t: 'desks', d: { desks: [ana, { id: 'mesa-02', online: false, locked: false }] } })).toBe(true)
+    expect(roster.room?.name).toBe('Mesa de ana')
+    expect(roster.roomOf('guest:bob')?.name).toBe('Mesa 2')
+    expect(roster.list().map((p) => p.room?.name)).toEqual(['Mesa de ana', 'Mesa 2'])
+
+    roster.handle({ t: 'desks', d: { desks: [{ ...ana, ownerName: 'Ana Souza', online: false }] } })
+    expect(roster.room?.name).toBe('Mesa de Ana Souza')
+    expect(roster.handle({ t: 'deskInvite', d: { desk: 'mesa-01', owner: 'guest:ana', ownerName: 'Ana Souza', invited: true } })).toBe(true)
+    expect(roster.desks.lockedForMe('mesa-01')).toBe(false)
+  })
 })

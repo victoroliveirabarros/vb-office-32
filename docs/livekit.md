@@ -108,46 +108,50 @@ about 100 ms after the media has already stopped.
 
 ## Screen sharing
 
-- Offered only inside a `meeting` zone, with the call connected, and not
-  while someone else in the room is sharing. Leaving the meeting room (or
-  entering a `private` one) stops the share; so do the browser's own "stop
-  sharing" button and the room dropping. Cancelling the picker is not an
-  error. A share never restarts by itself, since the picker needs a click.
+- Offered inside any zone (`meeting`, `private` or `desk`), with the call
+  connected, and not while someone else in the zone is sharing. Leaving the
+  zone stops the share, and so does stepping straight into another one
+  (desks of a row touch: x 17 → 18 goes from `mesa-01` to `mesa-02`), since
+  the client remembers the zone the share started in; so do the browser's
+  own "stop sharing" button and the room dropping. Cancelling the picker is
+  not an error. A share never restarts by itself, since the picker needs a
+  click.
 - **Leaving with a screen on air.** Stopping a share is asynchronous
   (unpublishing takes a negotiation, and the picker or the publish may still
-  be pending at the door), while the open area's `nearby` arrives right
-  after `zone`. So outside a meeting room, while the screen is live or a
-  share call is pending, the client only ever narrows its permissions (it
-  sends the intersection of the last list and the new `nearby`) and widens
-  them to the whole `nearby` once the screen is off the air. A share whose
-  picker resolves after leaving is unpublished first. Per-track
-  permissions (leaving the screen's track out) were discarded: every
-  publish, and every full reconnect, changes the track IDs, so the list
-  would have to follow each one, and a gap would block the microphone.
+  be pending at the door), while the new place's `nearby` arrives right
+  after `zone`. So away from the share's zone (outside every zone or in
+  another one), while the screen is live or a share call is pending, the
+  client only ever narrows its permissions (it sends the intersection of the
+  last list and the new `nearby`) and widens them to the whole `nearby` once
+  the screen is off the air. A share whose picker resolves after leaving is
+  unpublished first. Per-track permissions (leaving the screen's track out)
+  were discarded: every publish, and every full reconnect, changes the track
+  IDs, so the list would have to follow each one, and a gap would block the
+  microphone.
 - **Reconnects.** A full reconnect unpublishes and republishes every track,
   the screen included, without stopping its capture; only a capture that
   really ended (the browser's button, our own stop) ends the share. Once
   reconnected the client asks the room whether the screen is on air,
-  follows it, and stops it if it should not be (outside a meeting room or
+  follows it, and stops it if it should not be (away from its zone or
   turned off meanwhile).
 - **Two shares at once.** Two people may click within the same round trip,
   before either sees the other's screen. Whoever has the larger identity
-  stops theirs and is told that someone in the room started first.
+  stops theirs and is told that someone in the zone started first.
 - Published at 720p and 5 fps (`ScreenSharePresets.h720fps5`, capped at
   800 kbit/s, `contentHint: detail`) with a 360p layer at up to
   200 kbit/s, the SDK default for screens; dynacast pauses whichever layer
   nobody pulls. No audio.
-- Each client watches at most one screen: only inside a meeting room, only
-  from someone in its `nearby` set, keeping the current one while it lasts
-  and otherwise the smallest identity. It shows on a large stage over the
-  map.
+- Each client watches at most one screen: only inside a zone, only from
+  someone in its `nearby` set (the same zone), keeping the current one while
+  it lasts and otherwise the smallest identity. It shows on a large stage
+  over the map.
 - The page sends `Permissions-Policy: display-capture=(self)`;
   `display-capture=()` would block `getDisplayMedia`.
 - LiveKit does not stop a modified client from publishing a screen outside
-  a meeting room. The server tolerates it: honest clients never subscribe
-  to a screen outside a meeting room, so it reaches nobody else and costs
-  no egress. Removing such tracks (webhook `track_published` +
-  `UpdateParticipant`) is in the backlog.
+  a zone. The server tolerates it: honest clients never subscribe to a
+  screen outside a zone, so it reaches nobody else and costs no egress.
+  Removing such tracks (webhook `track_published` + `UpdateParticipant`) is
+  in the backlog.
 
 ## Removal
 
@@ -338,8 +342,8 @@ most).
 A screen share costs about 0.2 to 0.8 Mbit/s per viewer: the 720p layer
 the stage pulls is capped at 800 kbit/s at 5 fps, and a mostly static
 screen sends far less (a headless Chrome's synthetic desktop measured
-130 kbit/s at 1280x720 and 5 fps). With one screen per room and viewers
-limited to the room, a meeting of N costs at most N − 1 times that.
+130 kbit/s at 1280x720 and 5 fps). With one screen per zone and viewers
+limited to the zone, a meeting of N costs at most N − 1 times that.
 
 Inside a zone everyone in the room plays at full volume; distance only
 lowers the volume in the open area.

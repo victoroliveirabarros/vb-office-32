@@ -27,6 +27,9 @@ type config struct {
 	auth           string
 	oidc           auth.OIDCConfig
 	livekit        livekitConfig
+	// desks maps desk ids to owners; desksVar names where they came from.
+	desks    map[string]deskOwner
+	desksVar string
 }
 
 // livekitConfig is zero when media is off.
@@ -70,6 +73,10 @@ func loadConfig(getenv func(string) string) (config, error) {
 	}
 	cfg.livekit, err = loadLiveKit(getenv)
 	errs = append(errs, err)
+	// The owners are checked against the auth mode, so only once it is valid.
+	if errors.Join(errs...) == nil {
+		errs = append(errs, loadDesks(getenv, &cfg))
+	}
 	if err := errors.Join(errs...); err != nil {
 		return config{}, err
 	}

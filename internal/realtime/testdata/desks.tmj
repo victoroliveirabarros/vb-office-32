@@ -1,0 +1,23 @@
+{
+  "orientation": "orthogonal",
+  "infinite": false,
+  "width": 8,
+  "height": 3,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "layers": [
+    { "name": "floor", "type": "tilelayer", "width": 8, "height": 3, "data": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] },
+    { "name": "walls", "type": "tilelayer", "width": 8, "height": 3, "data": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 0, 0] },
+    { "name": "spawns", "type": "objectgroup", "objects": [
+      { "point": true, "x": 208, "y": 16 },
+      { "point": true, "x": 240, "y": 16 },
+      { "point": true, "x": 240, "y": 80 }
+    ] },
+    { "name": "zones", "type": "objectgroup", "objects": [
+      { "id": 4, "name": "Mesa A", "x": 0, "y": 32, "width": 96, "height": 64, "rotation": 0,
+        "properties": [{ "name": "id", "type": "string", "value": "mesa-a" }, { "name": "kind", "type": "string", "value": "desk" }] },
+      { "id": 5, "name": "Mesa B", "x": 96, "y": 32, "width": 96, "height": 64, "rotation": 0,
+        "properties": [{ "name": "id", "type": "string", "value": "mesa-b" }, { "name": "kind", "type": "string", "value": "desk" }] }
+    ] }
+  ]
+}

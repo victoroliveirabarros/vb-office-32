@@ -27,6 +27,11 @@ const (
 
 	typeAppearance = "appearance"
 
+	typeDesks      = "desks"
+	typeDeskGuests = "deskGuests"
+	typeDeskInvite = "deskInvite"
+	typeDeskRevoke = "deskRevoke"
+
 	typeChat        = "chat"
 	typeChatHistory = "chatHistory"
 	typeChatError   = "chatError"
@@ -48,8 +53,8 @@ type envelope struct {
 	D json.RawMessage `json:"d"`
 }
 
-// clientMsg is a decoded client message: moveMsg, pingMsg, chatIn or
-// appearanceIn.
+// clientMsg is a decoded client message: moveMsg, pingMsg, chatIn,
+// appearanceIn or deskIn.
 type clientMsg interface {
 	clientMsg()
 }
@@ -75,10 +80,17 @@ type chatIn struct {
 // the catalog; absent fields are 0.
 type appearanceIn avatar.Appearance
 
+// deskIn is a deskInvite, or a deskRevoke when invite is false.
+type deskIn struct {
+	Target string `json:"target"`
+	invite bool
+}
+
 func (moveMsg) clientMsg()      {}
 func (pingMsg) clientMsg()      {}
 func (chatIn) clientMsg()       {}
 func (appearanceIn) clientMsg() {}
+func (deskIn) clientMsg()       {}
 
 // valid checks what a well-formed chat can still get wrong; the answer is a
 // chatError, not a close.
@@ -170,6 +182,45 @@ type chatOut struct {
 	CID      string     `json:"cid,omitempty"`
 }
 
+// desksMsg is the public state of every desk: Locked is true for a desk
+// with an owner, whoever reads it; Owner is set only then, with an ID once
+// the owner connected.
+type desksMsg struct {
+	Desks []deskMsg `json:"desks"`
+}
+
+type deskMsg struct {
+	ID     string        `json:"id"`
+	Owner  *deskOwnerMsg `json:"owner,omitempty"`
+	Online bool          `json:"online"`
+	Locked bool          `json:"locked"`
+}
+
+type deskOwnerMsg struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
+}
+
+// deskGuestsMsg goes only to the owner, with the guests sorted by ID.
+type deskGuestsMsg struct {
+	Desk   string         `json:"desk"`
+	Guests []deskGuestMsg `json:"guests"`
+}
+
+type deskGuestMsg struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Online bool   `json:"online"`
+}
+
+// deskInviteMsg goes only to the guest.
+type deskInviteMsg struct {
+	Desk      string `json:"desk"`
+	Owner     string `json:"owner"`
+	OwnerName string `json:"ownerName"`
+	Invited   bool   `json:"invited"`
+}
+
 type chatHistoryMsg struct {
 	Messages []chatOut `json:"messages"`
 }
@@ -237,6 +288,13 @@ func decodeClient(b []byte) (clientMsg, error) {
 			return nil, fmt.Errorf("%w: appearance: null", errInvalidMessage)
 		}
 		return *m, nil
+	case typeDeskInvite, typeDeskRevoke:
+		var m deskIn
+		if err := json.Unmarshal(env.D, &m); err != nil {
+			return nil, fmt.Errorf("%w: %s: %w", errInvalidMessage, env.T, jsonError(err))
+		}
+		m.invite = env.T == typeDeskInvite
+		return m, nil
 	}
 	return nil, fmt.Errorf("%w: type %q", errInvalidMessage, env.T)
 }

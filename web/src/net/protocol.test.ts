@@ -33,6 +33,63 @@ describe('parseServerMessage', () => {
     }
   })
 
+  it('parses the desks, flattening their owners', () => {
+    const raw = {
+      t: 'desks',
+      d: {
+        desks: [
+          { id: 'mesa-01', owner: { id: 'oidc:1', name: 'Ana Souza' }, online: true, locked: true },
+          { id: 'mesa-02', owner: { name: 'Bruno Lima' }, online: false, locked: true },
+          { id: 'mesa-05', online: false, locked: false },
+        ],
+      },
+    }
+    expect(parseServerMessage(JSON.stringify(raw))).toEqual({
+      t: 'desks',
+      d: {
+        desks: [
+          { id: 'mesa-01', ownerId: 'oidc:1', ownerName: 'Ana Souza', online: true, locked: true },
+          { id: 'mesa-02', ownerName: 'Bruno Lima', online: false, locked: true },
+          { id: 'mesa-05', online: false, locked: false },
+        ],
+      },
+    })
+  })
+
+  it('rejects malformed desks', () => {
+    for (const d of [
+      {},
+      { desks: 'x' },
+      { desks: [{ id: 'mesa-01', online: true }] },
+      { desks: [{ id: 'mesa-01', online: 'yes', locked: true }] },
+      { desks: [{ id: 'mesa-01', online: true, locked: true, owner: { id: 'x' } }] },
+      { desks: [{ id: 'mesa-01', online: true, locked: true, owner: { id: 1, name: 'Ana' } }] },
+      { desks: [{ id: 'mesa-01', online: true, locked: true }, null] },
+    ])
+      expect(parseServerMessage(JSON.stringify({ t: 'desks', d }))).toBeNull()
+  })
+
+  it('parses the guests of our desk and our invites', () => {
+    expect(parseServerMessage('{"t":"deskGuests","d":{"desk":"mesa-01","guests":[{"id":"guest:eve","name":"eve","online":false}]}}')).toEqual({
+      t: 'deskGuests',
+      d: { desk: 'mesa-01', guests: [{ id: 'guest:eve', name: 'eve', online: false }] },
+    })
+    expect(parseServerMessage('{"t":"deskGuests","d":{"desk":"mesa-01","guests":[]}}')).toEqual({ t: 'deskGuests', d: { desk: 'mesa-01', guests: [] } })
+    expect(parseServerMessage('{"t":"deskInvite","d":{"desk":"mesa-01","owner":"oidc:1","ownerName":"Ana","invited":true}}')).toEqual({
+      t: 'deskInvite',
+      d: { desk: 'mesa-01', owner: 'oidc:1', ownerName: 'Ana', invited: true },
+    })
+  })
+
+  it('rejects malformed guests and invites', () => {
+    expect(parseServerMessage('{"t":"deskGuests","d":{"desk":"mesa-01"}}')).toBeNull()
+    expect(parseServerMessage('{"t":"deskGuests","d":{"desk":"mesa-01","guests":[{"id":"a","name":"A"}]}}')).toBeNull()
+    expect(parseServerMessage('{"t":"deskGuests","d":{"guests":[]}}')).toBeNull()
+    expect(parseServerMessage('{"t":"deskInvite","d":{"desk":"mesa-01","owner":"oidc:1","ownerName":"Ana"}}')).toBeNull()
+    expect(parseServerMessage('{"t":"deskInvite","d":{"desk":"mesa-01","owner":"oidc:1","ownerName":"Ana","invited":1}}')).toBeNull()
+    expect(parseServerMessage('{"t":"deskInvite","d":{"desk":"mesa-01","ownerName":"Ana","invited":true}}')).toBeNull()
+  })
+
   it('rejects malformed media and nearby', () => {
     expect(parseServerMessage('{"t":"media","d":{"url":"wss://m","token":"t"}}')).toBeNull()
     expect(parseServerMessage('{"t":"media","d":{"url":"wss://m","token":"t","expiresAt":"1"}}')).toBeNull()
@@ -53,6 +110,10 @@ describe('parseServerMessage', () => {
       d: { id: 'cab', name: 'Cabine', kind: 'private' },
     })
     expect(parseServerMessage('{"t":"zone","d":{"id":"cab"}}')).toEqual({ t: 'zone', d: { id: 'cab', kind: 'private' } })
+    expect(parseServerMessage('{"t":"zone","d":{"id":"mesa-01","name":"Mesa 1","kind":"desk"}}')).toEqual({
+      t: 'zone',
+      d: { id: 'mesa-01', name: 'Mesa 1', kind: 'desk' },
+    })
     expect(parseServerMessage('{"t":"zone","d":{"id":"","name":"x","kind":"meeting"}}')).toEqual({ t: 'zone', d: { id: '' } })
   })
 
@@ -160,5 +221,10 @@ describe('encode', () => {
   it('sends an appearance as its fields', () => {
     const look = { skin: 1, hair: 2, hairColor: 3, shirt: 4, pants: 0, acc: 1 }
     expect(JSON.parse(encode({ t: 'appearance', d: look }))).toEqual({ t: 'appearance', d: look })
+  })
+
+  it('sends desk invites and revocations by target', () => {
+    expect(encode({ t: 'deskInvite', d: { target: 'guest:eve' } })).toBe('{"t":"deskInvite","d":{"target":"guest:eve"}}')
+    expect(encode({ t: 'deskRevoke', d: { target: 'guest:eve' } })).toBe('{"t":"deskRevoke","d":{"target":"guest:eve"}}')
   })
 })

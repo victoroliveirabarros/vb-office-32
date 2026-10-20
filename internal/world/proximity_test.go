@@ -274,12 +274,37 @@ func BenchmarkStepProximity200(b *testing.B) {
 		rows[i] = strings.Repeat(".", 40)
 	}
 	rows[0] = "0" + rows[0][1:]
-	benchmarkStep(b, rows)
+	benchmarkStep(b, rows, nil)
 }
 
 // BenchmarkStepProximity200Zones puts four 10x8 rooms in the same open
 // area, so about a third of the players are in a zone at any time.
 func BenchmarkStepProximity200Zones(b *testing.B) {
+	benchmarkStep(b, fourRooms(), nil)
+}
+
+// BenchmarkStepProximity200Locked is BenchmarkStepProximity200Zones with
+// two rooms open to half the players and one to nobody.
+func BenchmarkStepProximity200Locked(b *testing.B) {
+	benchmarkStep(b, fourRooms(), func(s *Space, ids []string) {
+		var half []string
+		for i, id := range ids {
+			if i%2 == 0 {
+				half = append(half, id)
+			}
+		}
+		for _, z := range []string{"a", "b"} {
+			if err := s.Lock(z, half...); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := s.Lock("c"); err != nil {
+			b.Fatal(err)
+		}
+	})
+}
+
+func fourRooms() []string {
 	rows := make([]string, 25)
 	for y := range rows {
 		row := []byte(strings.Repeat(".", 40))
@@ -300,12 +325,12 @@ func BenchmarkStepProximity200Zones(b *testing.B) {
 		rows[y] = string(row)
 	}
 	rows[0] = "0" + rows[0][1:]
-	benchmarkStep(b, rows)
+	return rows
 }
 
 // benchmarkStep moves 200 players at random on the map, one step each per
-// tick.
-func benchmarkStep(b *testing.B, rows []string) {
+// tick, after setup when not nil.
+func benchmarkStep(b *testing.B, rows []string, setup func(s *Space, ids []string)) {
 	s := NewSpace(asciiMap(b, rows...))
 	rng := rand.New(rand.NewPCG(1, 2))
 	ids := make([]string, 200)
@@ -313,6 +338,9 @@ func benchmarkStep(b *testing.B, rows []string) {
 		ids[i] = fmt.Sprintf("p%03d", i)
 		s.Join(ids[i], ids[i])
 		s.players[ids[i]].Pos = tilemap.Point{X: rng.IntN(40), Y: rng.IntN(25)}
+	}
+	if setup != nil {
+		setup(s, ids)
 	}
 	dirs := []Dir{Up, Down, Left, Right}
 	now := t0

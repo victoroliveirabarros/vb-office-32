@@ -15,6 +15,22 @@
     </button>
     <div id="zone" class="pill brand zone-strip" hidden></div>
     <div id="zone-status" class="sr-only" role="status"></div>
+    <div id="toasts" class="toasts" role="status"></div>
+    <div id="person-popover" class="person-popover" role="dialog" aria-labelledby="person-popover-name" hidden>
+      <div class="person-popover-head">
+        <span id="person-popover-avatar" class="person-avatar"></span>
+        <span id="person-popover-name" class="person-popover-name" dir="auto"></span>
+        <button id="person-popover-close" class="icon-button" type="button" aria-label="Fechar" title="Fechar (Esc)">
+          <svg class="icon" aria-hidden="true"><use href="/icons.svg#x" /></svg>
+        </button>
+      </div>
+      <div class="person-popover-actions">
+        <button id="person-popover-message" class="button button-ghost" type="button">
+          <svg class="icon" aria-hidden="true"><use href="/icons.svg#message-circle" /></svg><span>Mensagem direta</span>
+        </button>
+        <button id="person-popover-invite" class="button button-ghost" type="button"></button>
+      </div>
+    </div>
     <div id="zoom" class="brand zoom" role="group" aria-label="Zoom do mapa" hidden>
       <button id="zoom-in" class="zoom-button" type="button" aria-label="Aproximar" title="Aproximar (+)" aria-keyshortcuts="+">
         <svg class="icon" aria-hidden="true"><use href="/icons.svg#zoom-in" /></svg>
@@ -148,8 +164,13 @@
           <ul id="people-list" class="people-list" aria-label="Pessoas no escritório"></ul>
         </div>
         <div id="rooms-panel" class="panel-body rooms-panel" hidden>
-          <p class="panel-note">Salas fecham o áudio e o chat “Perto” para quem está dentro; nas áreas abertas a conversa é por proximidade.</p>
+          <p class="panel-note">Salas e mesas fecham o áudio, o vídeo e o chat “Perto” para quem está dentro; nas áreas abertas a conversa é por proximidade.</p>
           <ul id="rooms-list" class="rooms-list" aria-label="Salas e áreas"></ul>
+          <section id="desks-section" class="desks-section" aria-labelledby="desks-title" hidden>
+            <h3 id="desks-title" class="desks-title"><svg class="icon" aria-hidden="true"><use href="/icons.svg#armchair" /></svg>Mesas</h3>
+            <p class="panel-note">Só o dono e quem ele convidar entram numa mesa com dono.</p>
+            <ul id="desks-list" class="rooms-list desks-list" aria-labelledby="desks-title"></ul>
+          </section>
         </div>
         <div id="settings-panel" class="panel-body settings-panel" hidden>
           <section class="settings-group" aria-labelledby="settings-theme-title">

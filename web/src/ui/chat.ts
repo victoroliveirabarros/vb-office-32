@@ -9,6 +9,7 @@ import type { Entry, FailReason, Tab, TabKey } from '../chat/state'
 import type { Connection, ConnectionStatus } from '../net/connection'
 import type { ServerMessage } from '../net/protocol'
 import { icon, requireElement } from './dom'
+import { zoneWord } from './zone'
 
 // Everything user-supplied reaches the page through textContent only.
 
@@ -59,8 +60,9 @@ export function tabNotice(tab: Tab, roster: RosterView): Notice {
     case 'nearby': {
       const names = roster.nearby().map((id) => roster.label(id) ?? id)
       if (roster.room) {
-        if (names.length === 0) return { text: 'Visível só para quem está na sala. Ninguém mais aqui agora; só você verá.', canSend: true }
-        return { text: `Visível só para quem está na sala: ${names.join(', ')}.`, canSend: true }
+        const where = `Visível só para quem está na ${zoneWord(roster.room.kind)}`
+        if (names.length === 0) return { text: `${where}. Ninguém mais aqui agora; só você verá.`, canSend: true }
+        return { text: `${where}: ${names.join(', ')}.`, canSend: true }
       }
       if (names.length === 0) return { text: 'Ninguém perto de você agora; só você verá.', canSend: true }
       return { text: `Perto de você agora: ${names.join(', ')}.`, canSend: true }
@@ -75,10 +77,10 @@ export function tabNotice(tab: Tab, roster: RosterView): Notice {
 
 export type PersonTag = { text: string; kind: 'near' | 'room' | 'elsewhere' }
 
-/** Where someone else is from our point of view: in our room, near us, or in another room. */
+/** Where someone else is from our point of view: in our room or at our desk, near us, or in another room. */
 export function personTag(person: Person, roster: Pick<Roster, 'room' | 'inOurRoom'>): PersonTag | null {
   if (person.self) return null
-  if (roster.inOurRoom(person.id)) return { text: 'na sala', kind: 'room' }
+  if (roster.inOurRoom(person.id)) return { text: `na ${zoneWord(roster.room?.kind)}`, kind: 'room' }
   if (!roster.room && person.nearby) return { text: 'perto', kind: 'near' }
   if (person.room) return { text: person.room.name, kind: 'elsewhere' }
   return null

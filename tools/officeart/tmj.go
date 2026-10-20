@@ -20,6 +20,19 @@ var zones = []zone{
 	{"Sala de reunião", "reuniao", "meeting", 384, 32, 448, 256},
 	{"Sala privada", "privada", "private", 32, 320, 320, 224},
 	{"Ringue de box", "ringue", "private", 1248, 320, 320, 224},
+	// One desk per station: the chair row and the desk row, 3×2 tiles.
+	{"Mesa 1", "mesa-01", "desk", 480, 416, 96, 64},
+	{"Mesa 2", "mesa-02", "desk", 576, 416, 96, 64},
+	{"Mesa 3", "mesa-03", "desk", 672, 416, 96, 64},
+	{"Mesa 4", "mesa-04", "desk", 480, 480, 96, 64},
+	{"Mesa 5", "mesa-05", "desk", 576, 480, 96, 64},
+	{"Mesa 6", "mesa-06", "desk", 672, 480, 96, 64},
+	{"Mesa 7", "mesa-07", "desk", 832, 416, 96, 64},
+	{"Mesa 8", "mesa-08", "desk", 928, 416, 96, 64},
+	{"Mesa 9", "mesa-09", "desk", 1024, 416, 96, 64},
+	{"Mesa 10", "mesa-10", "desk", 832, 480, 96, 64},
+	{"Mesa 11", "mesa-11", "desk", 928, 480, 96, 64},
+	{"Mesa 12", "mesa-12", "desk", 1024, 480, 96, 64},
 }
 
 // Areas name the open floor for the client's lists; the server ignores them.
